@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadProject } from "@/lib/queries";
+import { getTenant } from "@/lib/tenant";
 import { PageHeader, Stat, StatusBadge, Badge } from "@/components/ui";
 import { money, pct, fmtDate } from "@/lib/format";
 import { BudgetTab } from "./BudgetTab";
@@ -19,7 +20,8 @@ const TABS = [
 export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
   const { id } = await params;
   const { tab = "budget" } = await searchParams;
-  const data = await loadProject(id);
+  const { company } = await getTenant();
+  const data = await loadProject(company.id, id);
   if (!data) notFound();
   const { project: p, econ: e, flags } = data;
 

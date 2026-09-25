@@ -1,9 +1,11 @@
 import { loadPortfolio } from "@/lib/queries";
+import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, StatusBadge, Progress, M, ProjectCell } from "@/components/ui";
 import { pct, fmtDate } from "@/lib/format";
 
 export default async function Projects() {
-  const { projects } = await loadPortfolio(["ACTIVE", "BID", "COMPLETE"]);
+  const { company } = await getTenant();
+  const projects = await loadPortfolio(company.id, ["ACTIVE", "BID", "COMPLETE"]);
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Projects" subtitle="Each project maps to a QuickBooks Online Project (Plus/Advanced)." />

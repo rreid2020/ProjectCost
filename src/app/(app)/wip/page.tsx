@@ -1,16 +1,18 @@
 import { db, schema as s } from "@/db";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { loadPortfolio } from "@/lib/queries";
+import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, M, Stat, ProjectCell } from "@/components/ui";
 import { money, pct, fmtDate } from "@/lib/format";
 import { wipJournal, burdenJournal, isBalanced } from "@/lib/engine";
 import { closeWipPeriod } from "@/app/actions";
 
 export default async function Wip() {
-  const { company, projects } = await loadPortfolio();
+  const { company, isAdmin } = await getTenant();
+  const projects = await loadPortfolio(company.id);
   const now = new Date();
   const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-  const snaps = await db.select({ periodEnd: s.wipSnapshots.periodEnd, createdAt: s.wipSnapshots.createdAt }).from(s.wipSnapshots).orderBy(desc(s.wipSnapshots.periodEnd));
+  const snaps = await db.select({ periodEnd: s.wipSnapshots.periodEnd, createdAt: s.wipSnapshots.createdAt }).from(s.wipSnapshots).where(eq(s.wipSnapshots.companyId, company.id)).orderBy(desc(s.wipSnapshots.periodEnd));
   const periods = [...new Map(snaps.map((x) => [x.periodEnd, x])).values()];
 
   const rows = projects.map((p) => ({ p: p.project, e: p.econ }));
@@ -25,10 +27,12 @@ export default async function Wip() {
     <div className="mx-auto max-w-7xl">
       <PageHeader title="WIP schedule & month-end" subtitle={`Percentage-of-completion (cost-to-cost) · period ending ${fmtDate(periodEnd)} · books closed through ${fmtDate(company.closedThrough)}`}
         actions={
-          <form action={closeWipPeriod} className="flex items-center gap-2">
-            <input type="hidden" name="periodEnd" value={periodEnd} />
-            <button className="btn">Save WIP snapshot for {fmtDate(periodEnd)}</button>
-          </form>
+          isAdmin ? (
+            <form action={closeWipPeriod} className="flex items-center gap-2">
+              <input type="hidden" name="periodEnd" value={periodEnd} />
+              <button className="btn">Save WIP snapshot for {fmtDate(periodEnd)}</button>
+            </form>
+          ) : <span className="text-xs text-slate-500">An admin saves the month-end snapshot.</span>
         } />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

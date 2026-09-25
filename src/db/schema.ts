@@ -1,14 +1,21 @@
-// ProjectCost data model.
+// ProjectCost data model (Postgres).
 // Conventions: money = integer cents, percentages = basis points (1% = 100 bp),
 // hours = hundredths (7.5h = 750), dates = ISO 'YYYY-MM-DD' text.
-// Local dev runs on SQLite (libsql). Production target is Postgres (drizzle pg-core port is 1:1).
-import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+//
+// Multi-tenancy: a company is a tenant (one Clerk organization). Every tenant-owned row carries
+// company_id, and references between tenant rows are composite foreign keys on
+// (company_id, <parent>_id) -> parent(company_id, id). The database therefore rejects any row that
+// points at another company's project, cost code, employee, etc., even if app code is wrong.
+import { pgTable, text, integer, bigint, boolean, uniqueIndex, unique, foreignKey, index, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
+const cents = (name: string) => bigint(name, { mode: "number" }); // bigint: contracts can exceed int4's $21.4M in cents
+const companyId = () => text("company_id").notNull().references(() => companies.id, { onDelete: "cascade" });
 
-export const companies = sqliteTable("company", {
+export const companies = pgTable("company", {
   id: id(),
+  clerkOrgId: text("clerk_org_id").unique(), // null only for rows created outside the app (e.g. tests)
   name: text("name").notNull(),
   region: text("region").notNull().default("CA"), // CA | US
   province: text("province"), // ON, BC, TX...
@@ -18,59 +25,81 @@ export const companies = sqliteTable("company", {
   qboConnectedAt: text("qbo_connected_at"),
   defaultHoldbackBp: integer("default_holdback_bp").notNull().default(1000),
   defaultTaxBp: integer("default_tax_bp").notNull().default(1300),
+  createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  deletedAt: text("deleted_at"), // set when the Clerk organization is deleted
+  // billing (Stripe)
+  trialEndsAt: text("trial_ends_at"),
+  stripeCustomerId: text("stripe_customer_id").unique(),
+  stripeSubscriptionId: text("stripe_subscription_id").unique(),
+  plan: text("plan"), // key in src/lib/plans.ts
+  subscriptionStatus: text("subscription_status"), // Stripe status: trialing | active | past_due | canceled | unpaid ...
+  currentPeriodEnd: text("current_period_end"),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
 });
 
-export const costCodes = sqliteTable(
+export const costCodes = pgTable(
   "cost_code",
   {
     id: id(),
-    companyId: text("company_id").notNull().references(() => companies.id),
+    companyId: companyId(),
     code: text("code").notNull(),
     name: text("name").notNull(),
     costType: text("cost_type").notNull(), // LABOUR | MATERIAL | SUB | EQUIPMENT | OTHER
     qboItemId: text("qbo_item_id"),
-    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    active: boolean("active").notNull().default(true),
   },
-  (t) => [uniqueIndex("cost_code_company_code").on(t.companyId, t.code)],
+  (t) => [uniqueIndex("cost_code_company_code").on(t.companyId, t.code), unique("cost_code_tenant").on(t.companyId, t.id)],
 );
 
-export const customers = sqliteTable("customer", {
-  id: id(),
-  companyId: text("company_id").notNull().references(() => companies.id),
-  name: text("name").notNull(),
-  qboId: text("qbo_id"),
-});
+export const customers = pgTable(
+  "customer",
+  {
+    id: id(),
+    companyId: companyId(),
+    name: text("name").notNull(),
+    qboId: text("qbo_id"),
+  },
+  (t) => [unique("customer_tenant").on(t.companyId, t.id)],
+);
 
-export const vendors = sqliteTable("vendor", {
-  id: id(),
-  companyId: text("company_id").notNull().references(() => companies.id),
-  name: text("name").notNull(),
-  qboId: text("qbo_id"),
-});
+export const vendors = pgTable(
+  "vendor",
+  {
+    id: id(),
+    companyId: companyId(),
+    name: text("name").notNull(),
+    qboId: text("qbo_id"),
+  },
+  (t) => [unique("vendor_tenant").on(t.companyId, t.id)],
+);
 
-export const employees = sqliteTable("employee", {
-  id: id(),
-  companyId: text("company_id").notNull().references(() => companies.id),
-  name: text("name").notNull(),
-  trade: text("trade").notNull(),
-  payRateCents: integer("pay_rate_cents").notNull(),
-  burdenBp: integer("burden_bp").notNull(), // CPP/EI/WSIB/EHT/benefits as % of wages
-  billRateCents: integer("bill_rate_cents").notNull(),
-  qboId: text("qbo_id"),
-  active: integer("active", { mode: "boolean" }).notNull().default(true),
-});
+export const employees = pgTable(
+  "employee",
+  {
+    id: id(),
+    companyId: companyId(),
+    name: text("name").notNull(),
+    trade: text("trade").notNull(),
+    payRateCents: integer("pay_rate_cents").notNull(),
+    burdenBp: integer("burden_bp").notNull(), // CPP/EI/WSIB/EHT/benefits as % of wages
+    billRateCents: integer("bill_rate_cents").notNull(),
+    qboId: text("qbo_id"),
+    active: boolean("active").notNull().default(true),
+  },
+  (t) => [unique("employee_tenant").on(t.companyId, t.id)],
+);
 
-export const projects = sqliteTable(
+export const projects = pgTable(
   "project",
   {
     id: id(),
-    companyId: text("company_id").notNull().references(() => companies.id),
-    customerId: text("customer_id").notNull().references(() => customers.id),
+    companyId: companyId(),
+    customerId: text("customer_id").notNull(),
     number: text("number").notNull(),
     name: text("name").notNull(),
     status: text("status").notNull().default("ACTIVE"), // BID | ACTIVE | COMPLETE
     contractType: text("contract_type").notNull().default("FIXED"), // FIXED | TM | COST_PLUS
-    originalContractCents: integer("original_contract_cents").notNull(),
+    originalContractCents: cents("original_contract_cents").notNull(),
     holdbackBp: integer("holdback_bp").notNull().default(1000),
     taxBp: integer("tax_bp").notNull().default(1300),
     projectManager: text("project_manager"),
@@ -78,148 +107,216 @@ export const projects = sqliteTable(
     endDate: text("end_date"),
     qboProjectId: text("qbo_project_id"),
   },
-  (t) => [uniqueIndex("project_company_number").on(t.companyId, t.number)],
+  (t) => [
+    uniqueIndex("project_company_number").on(t.companyId, t.number),
+    unique("project_tenant").on(t.companyId, t.id),
+    foreignKey({ name: "project_customer_fk", columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
+  ],
 );
 
-export const budgetLines = sqliteTable(
+// FK helpers for child tables: (company_id, x_id) -> parent(company_id, id)
+const toProject = (table: string, company: AnyPgColumn, project: AnyPgColumn) =>
+  foreignKey({ name: `${table}_project_fk`, columns: [company, project], foreignColumns: [projects.companyId, projects.id] }).onDelete("cascade");
+const toCostCode = (table: string, company: AnyPgColumn, costCode: AnyPgColumn) =>
+  foreignKey({ name: `${table}_cost_code_fk`, columns: [company, costCode], foreignColumns: [costCodes.companyId, costCodes.id] });
+
+export const budgetLines = pgTable(
   "budget_line",
   {
     id: id(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-    costCodeId: text("cost_code_id").notNull().references(() => costCodes.id),
-    originalCents: integer("original_cents").notNull(),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
+    costCodeId: text("cost_code_id").notNull(),
+    originalCents: cents("original_cents").notNull(),
     notes: text("notes"),
   },
-  (t) => [uniqueIndex("budget_project_code").on(t.projectId, t.costCodeId)],
+  (t) => [uniqueIndex("budget_project_code").on(t.projectId, t.costCodeId), toProject("budget_line", t.companyId, t.projectId), toCostCode("budget_line", t.companyId, t.costCodeId)],
 );
 
-export const changeOrders = sqliteTable(
+export const changeOrders = pgTable(
   "change_order",
   {
     id: id(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
     number: integer("number").notNull(),
     title: text("title").notNull(),
     status: text("status").notNull().default("PENDING"), // PENDING | APPROVED | REJECTED
-    contractAmountCents: integer("contract_amount_cents").notNull(),
+    contractAmountCents: cents("contract_amount_cents").notNull(),
     dateIssued: text("date_issued").notNull(),
     dateApproved: text("date_approved"),
   },
-  (t) => [uniqueIndex("co_project_number").on(t.projectId, t.number)],
+  (t) => [uniqueIndex("co_project_number").on(t.projectId, t.number), unique("change_order_tenant").on(t.companyId, t.id), toProject("change_order", t.companyId, t.projectId)],
 );
 
-export const changeOrderLines = sqliteTable("change_order_line", {
-  id: id(),
-  changeOrderId: text("change_order_id").notNull().references(() => changeOrders.id, { onDelete: "cascade" }),
-  costCodeId: text("cost_code_id").notNull().references(() => costCodes.id),
-  costCents: integer("cost_cents").notNull(),
-});
+export const changeOrderLines = pgTable(
+  "change_order_line",
+  {
+    id: id(),
+    companyId: companyId(),
+    changeOrderId: text("change_order_id").notNull(),
+    costCodeId: text("cost_code_id").notNull(),
+    costCents: cents("cost_cents").notNull(),
+  },
+  (t) => [
+    foreignKey({ name: "change_order_line_co_fk", columns: [t.companyId, t.changeOrderId], foreignColumns: [changeOrders.companyId, changeOrders.id] }).onDelete("cascade"),
+    toCostCode("change_order_line", t.companyId, t.costCodeId),
+  ],
+);
 
-export const forecasts = sqliteTable(
+export const forecasts = pgTable(
   "forecast",
   {
     id: id(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-    costCodeId: text("cost_code_id").notNull().references(() => costCodes.id),
-    etcCents: integer("etc_cents").notNull(), // estimate to complete; overrides remaining budget
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
+    costCodeId: text("cost_code_id").notNull(),
+    etcCents: cents("etc_cents").notNull(), // estimate to complete; overrides remaining budget
     updatedAt: text("updated_at").notNull(),
   },
-  (t) => [uniqueIndex("forecast_project_code").on(t.projectId, t.costCodeId)],
+  (t) => [uniqueIndex("forecast_project_code").on(t.projectId, t.costCodeId), toProject("forecast", t.companyId, t.projectId), toCostCode("forecast", t.companyId, t.costCodeId)],
 );
 
 // Mirror of QBO cost lines (Bill, Purchase, Check, JournalEntry).
-// projectId/costCodeId null => Unassigned Costs queue.
-export const costTransactions = sqliteTable("cost_transaction", {
-  id: id(),
-  companyId: text("company_id").notNull().references(() => companies.id),
-  projectId: text("project_id").references(() => projects.id),
-  costCodeId: text("cost_code_id").references(() => costCodes.id),
-  vendorId: text("vendor_id").references(() => vendors.id),
-  date: text("date").notNull(),
-  source: text("source").notNull(), // BILL | EXPENSE | CHECK | JE
-  docNumber: text("doc_number"),
-  description: text("description").notNull(),
-  amountCents: integer("amount_cents").notNull(), // pre-tax job cost
-  taxCents: integer("tax_cents").notNull().default(0), // recoverable ITC (CA) — not job cost
-  qboTxnId: text("qbo_txn_id"),
-  qboLineId: text("qbo_line_id"),
-  assignedAt: text("assigned_at"),
-  pendingPush: integer("pending_push", { mode: "boolean" }).notNull().default(false),
-});
+// projectId/costCodeId null => Unassigned Costs queue. (Composite FKs skip rows where a column is null.)
+export const costTransactions = pgTable(
+  "cost_transaction",
+  {
+    id: id(),
+    companyId: companyId(),
+    projectId: text("project_id"),
+    costCodeId: text("cost_code_id"),
+    vendorId: text("vendor_id"),
+    date: text("date").notNull(),
+    source: text("source").notNull(), // BILL | EXPENSE | CHECK | JE
+    docNumber: text("doc_number"),
+    description: text("description").notNull(),
+    amountCents: cents("amount_cents").notNull(), // pre-tax job cost
+    taxCents: cents("tax_cents").notNull().default(0), // recoverable ITC (CA) — not job cost
+    qboTxnId: text("qbo_txn_id"),
+    qboLineId: text("qbo_line_id"),
+    assignedAt: text("assigned_at"),
+    pendingPush: boolean("pending_push").notNull().default(false),
+  },
+  (t) => [
+    toProject("cost_transaction", t.companyId, t.projectId),
+    toCostCode("cost_transaction", t.companyId, t.costCodeId),
+    foreignKey({ name: "cost_transaction_vendor_fk", columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
+    index("cost_transaction_company_project").on(t.companyId, t.projectId),
+  ],
+);
 
-export const timeEntries = sqliteTable("time_entry", {
-  id: id(),
-  employeeId: text("employee_id").notNull().references(() => employees.id),
-  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  costCodeId: text("cost_code_id").notNull().references(() => costCodes.id),
-  date: text("date").notNull(),
-  hoursX100: integer("hours_x100").notNull(),
-  payRateCents: integer("pay_rate_cents").notNull(), // captured at entry (effective-dated)
-  burdenBp: integer("burden_bp").notNull(),
-  billRateCents: integer("bill_rate_cents").notNull(),
-  status: text("status").notNull().default("SUBMITTED"), // SUBMITTED | APPROVED
-  notes: text("notes"),
-  qboTimeActivityId: text("qbo_time_activity_id"),
-});
+export const timeEntries = pgTable(
+  "time_entry",
+  {
+    id: id(),
+    companyId: companyId(),
+    employeeId: text("employee_id").notNull(),
+    projectId: text("project_id").notNull(),
+    costCodeId: text("cost_code_id").notNull(),
+    date: text("date").notNull(),
+    hoursX100: integer("hours_x100").notNull(),
+    payRateCents: integer("pay_rate_cents").notNull(), // captured at entry (effective-dated)
+    burdenBp: integer("burden_bp").notNull(),
+    billRateCents: integer("bill_rate_cents").notNull(),
+    status: text("status").notNull().default("SUBMITTED"), // SUBMITTED | APPROVED
+    notes: text("notes"),
+    qboTimeActivityId: text("qbo_time_activity_id"),
+  },
+  (t) => [
+    foreignKey({ name: "time_entry_employee_fk", columns: [t.companyId, t.employeeId], foreignColumns: [employees.companyId, employees.id] }),
+    toProject("time_entry", t.companyId, t.projectId),
+    toCostCode("time_entry", t.companyId, t.costCodeId),
+    index("time_entry_company_status").on(t.companyId, t.status),
+    index("time_entry_project").on(t.projectId),
+  ],
+);
 
-export const sovLines = sqliteTable("sov_line", {
-  id: id(),
-  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
-  lineNo: integer("line_no").notNull(),
-  description: text("description").notNull(),
-  scheduledValueCents: integer("scheduled_value_cents").notNull(),
-  changeOrderNumber: integer("change_order_number"),
-});
+export const sovLines = pgTable(
+  "sov_line",
+  {
+    id: id(),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
+    lineNo: integer("line_no").notNull(),
+    description: text("description").notNull(),
+    scheduledValueCents: cents("scheduled_value_cents").notNull(),
+    changeOrderNumber: integer("change_order_number"),
+  },
+  (t) => [unique("sov_line_tenant").on(t.companyId, t.id), toProject("sov_line", t.companyId, t.projectId)],
+);
 
-export const progressBills = sqliteTable(
+export const progressBills = pgTable(
   "progress_bill",
   {
     id: id(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
     number: integer("number").notNull(),
     periodEnd: text("period_end").notNull(),
     status: text("status").notNull().default("DRAFT"), // DRAFT | POSTED
     qboInvoiceId: text("qbo_invoice_id"),
   },
-  (t) => [uniqueIndex("pb_project_number").on(t.projectId, t.number)],
+  (t) => [uniqueIndex("pb_project_number").on(t.projectId, t.number), unique("progress_bill_tenant").on(t.companyId, t.id), toProject("progress_bill", t.companyId, t.projectId)],
 );
 
-export const progressBillLines = sqliteTable("progress_bill_line", {
-  id: id(),
-  progressBillId: text("progress_bill_id").notNull().references(() => progressBills.id, { onDelete: "cascade" }),
-  sovLineId: text("sov_line_id").notNull().references(() => sovLines.id, { onDelete: "cascade" }),
-  thisPeriodCents: integer("this_period_cents").notNull(),
-});
+export const progressBillLines = pgTable(
+  "progress_bill_line",
+  {
+    id: id(),
+    companyId: companyId(),
+    progressBillId: text("progress_bill_id").notNull(),
+    sovLineId: text("sov_line_id").notNull(),
+    thisPeriodCents: cents("this_period_cents").notNull(),
+  },
+  (t) => [
+    foreignKey({ name: "progress_bill_line_bill_fk", columns: [t.companyId, t.progressBillId], foreignColumns: [progressBills.companyId, progressBills.id] }).onDelete("cascade"),
+    foreignKey({ name: "progress_bill_line_sov_fk", columns: [t.companyId, t.sovLineId], foreignColumns: [sovLines.companyId, sovLines.id] }).onDelete("cascade"),
+  ],
+);
 
-export const wipSnapshots = sqliteTable(
+export const wipSnapshots = pgTable(
   "wip_snapshot",
   {
     id: id(),
-    projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
     periodEnd: text("period_end").notNull(),
-    contractCents: integer("contract_cents").notNull(),
-    eacCents: integer("eac_cents").notNull(),
-    costToDateCents: integer("cost_to_date_cents").notNull(),
+    contractCents: cents("contract_cents").notNull(),
+    eacCents: cents("eac_cents").notNull(),
+    costToDateCents: cents("cost_to_date_cents").notNull(),
     pctCompleteBp: integer("pct_complete_bp").notNull(),
-    earnedCents: integer("earned_cents").notNull(),
-    billedCents: integer("billed_cents").notNull(),
-    overUnderCents: integer("over_under_cents").notNull(), // + overbilled (liability), − underbilled (asset)
-    lossProvisionCents: integer("loss_provision_cents").notNull().default(0),
+    earnedCents: cents("earned_cents").notNull(),
+    billedCents: cents("billed_cents").notNull(),
+    overUnderCents: cents("over_under_cents").notNull(), // + overbilled (liability), − underbilled (asset)
+    lossProvisionCents: cents("loss_provision_cents").notNull().default(0),
     createdAt: text("created_at").notNull(),
   },
-  (t) => [uniqueIndex("wip_project_period").on(t.projectId, t.periodEnd)],
+  (t) => [uniqueIndex("wip_project_period").on(t.projectId, t.periodEnd), toProject("wip_snapshot", t.companyId, t.projectId)],
 );
 
-export const syncLogs = sqliteTable("sync_log", {
-  id: id(),
-  companyId: text("company_id").notNull().references(() => companies.id),
-  entity: text("entity").notNull(),
-  qboId: text("qbo_id"),
-  direction: text("direction").notNull(), // PULL | PUSH
-  status: text("status").notNull(), // OK | ERROR | SKIPPED | QUEUED
-  message: text("message"),
-  requestId: text("request_id"),
-  createdAt: text("created_at").notNull(),
+export const syncLogs = pgTable(
+  "sync_log",
+  {
+    id: id(),
+    companyId: companyId(),
+    entity: text("entity").notNull(),
+    qboId: text("qbo_id"),
+    direction: text("direction").notNull(), // PULL | PUSH
+    status: text("status").notNull(), // OK | ERROR | SKIPPED | QUEUED
+    message: text("message"),
+    requestId: text("request_id"),
+    userId: text("user_id"), // Clerk user who triggered it
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [index("sync_log_company_created").on(t.companyId, t.createdAt)],
+);
+
+// Stripe webhook idempotency: each event id is processed once.
+export const stripeEvents = pgTable("stripe_event", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  receivedAt: text("received_at").notNull(),
 });
 
 // ---- relations (for db.query.* with nested reads) ----

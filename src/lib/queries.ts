@@ -1,48 +1,42 @@
 import "server-only";
 import { db, schema as s } from "@/db";
-import { and, eq, isNull, asc, desc, inArray } from "drizzle-orm";
+import { and, eq, isNull, asc, desc, inArray, count } from "drizzle-orm";
 import { labourCost, projectEconomics, healthFlags, type CodeInput, type CostType } from "./engine";
-
-export async function getCompany() {
-  const c = await db.query.companies.findFirst();
-  if (!c) throw new Error("No company found — run `npm run seed`.");
-  return c;
-}
 
 export async function getCostCodes(companyId: string) {
   return db.select().from(s.costCodes).where(eq(s.costCodes.companyId, companyId)).orderBy(asc(s.costCodes.code));
 }
 
-/** Loads everything the engine needs for one project and returns economics + detail. */
-export async function loadProject(projectId: string) {
+/** Loads everything the engine needs for one of this company's projects; null if it isn't theirs. */
+export async function loadProject(companyId: string, projectId: string) {
   const project = await db.query.projects.findFirst({
-    where: eq(s.projects.id, projectId),
+    where: and(eq(s.projects.id, projectId), eq(s.projects.companyId, companyId)),
     with: { customer: true },
   });
   if (!project) return null;
 
   const [codes, budget, cos, costs, time, fc, sov, bills] = await Promise.all([
-    getCostCodes(project.companyId),
-    db.select().from(s.budgetLines).where(eq(s.budgetLines.projectId, projectId)),
+    getCostCodes(companyId),
+    db.select().from(s.budgetLines).where(and(eq(s.budgetLines.projectId, projectId), eq(s.budgetLines.companyId, companyId))),
     db.query.changeOrders.findMany({
-      where: eq(s.changeOrders.projectId, projectId),
+      where: and(eq(s.changeOrders.projectId, projectId), eq(s.changeOrders.companyId, companyId)),
       with: { lines: { with: { costCode: true } } },
       orderBy: asc(s.changeOrders.number),
     }),
     db.query.costTransactions.findMany({
-      where: eq(s.costTransactions.projectId, projectId),
+      where: and(eq(s.costTransactions.projectId, projectId), eq(s.costTransactions.companyId, companyId)),
       with: { vendor: true, costCode: true },
       orderBy: desc(s.costTransactions.date),
     }),
     db.query.timeEntries.findMany({
-      where: eq(s.timeEntries.projectId, projectId),
+      where: and(eq(s.timeEntries.projectId, projectId), eq(s.timeEntries.companyId, companyId)),
       with: { employee: true, costCode: true },
       orderBy: desc(s.timeEntries.date),
     }),
-    db.select().from(s.forecasts).where(eq(s.forecasts.projectId, projectId)),
-    db.select().from(s.sovLines).where(eq(s.sovLines.projectId, projectId)).orderBy(asc(s.sovLines.lineNo)),
+    db.select().from(s.forecasts).where(and(eq(s.forecasts.projectId, projectId), eq(s.forecasts.companyId, companyId))),
+    db.select().from(s.sovLines).where(and(eq(s.sovLines.projectId, projectId), eq(s.sovLines.companyId, companyId))).orderBy(asc(s.sovLines.lineNo)),
     db.query.progressBills.findMany({
-      where: eq(s.progressBills.projectId, projectId),
+      where: and(eq(s.progressBills.projectId, projectId), eq(s.progressBills.companyId, companyId)),
       with: { lines: true },
       orderBy: asc(s.progressBills.number),
     }),
@@ -94,13 +88,12 @@ export async function loadProject(projectId: string) {
 
 export type LoadedProject = NonNullable<Awaited<ReturnType<typeof loadProject>>>;
 
-export async function loadPortfolio(statuses: string[] = ["ACTIVE"]) {
-  const company = await getCompany();
+export async function loadPortfolio(companyId: string, statuses: string[] = ["ACTIVE"]) {
   const list = await db.select({ id: s.projects.id }).from(s.projects)
-    .where(and(eq(s.projects.companyId, company.id), inArray(s.projects.status, statuses)))
+    .where(and(eq(s.projects.companyId, companyId), inArray(s.projects.status, statuses)))
     .orderBy(asc(s.projects.number));
-  const loaded = await Promise.all(list.map((p) => loadProject(p.id)));
-  return { company, projects: loaded.filter(Boolean) as LoadedProject[] };
+  const loaded = await Promise.all(list.map((p) => loadProject(companyId, p.id)));
+  return loaded.filter(Boolean) as LoadedProject[];
 }
 
 export async function unassignedCosts(companyId: string) {
@@ -109,4 +102,18 @@ export async function unassignedCosts(companyId: string) {
     with: { vendor: true },
     orderBy: desc(s.costTransactions.date),
   });
+}
+
+export async function activeProjects(companyId: string) {
+  return db.select().from(s.projects).where(and(eq(s.projects.companyId, companyId), eq(s.projects.status, "ACTIVE"))).orderBy(asc(s.projects.number));
+}
+
+export async function pendingTimeCount(companyId: string) {
+  const [r] = await db.select({ n: count() }).from(s.timeEntries).where(and(eq(s.timeEntries.companyId, companyId), eq(s.timeEntries.status, "SUBMITTED")));
+  return r.n;
+}
+
+export async function unassignedCount(companyId: string) {
+  const [r] = await db.select({ n: count() }).from(s.costTransactions).where(and(eq(s.costTransactions.companyId, companyId), isNull(s.costTransactions.projectId)));
+  return r.n;
 }

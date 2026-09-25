@@ -1,17 +1,18 @@
 import { db, schema as s } from "@/db";
-import { and, eq, asc, desc } from "drizzle-orm";
-import { getCompany, getCostCodes, unassignedCosts } from "@/lib/queries";
+import { and, eq, desc } from "drizzle-orm";
+import { activeProjects, getCostCodes, unassignedCosts } from "@/lib/queries";
+import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, M, Empty, Badge } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
 import { assignCost } from "@/app/actions";
 
 export default async function Costs() {
-  const company = await getCompany();
+  const { company } = await getTenant();
   const [items, codes, projects, recent] = await Promise.all([
     unassignedCosts(company.id),
     getCostCodes(company.id),
-    db.select().from(s.projects).where(and(eq(s.projects.companyId, company.id), eq(s.projects.status, "ACTIVE"))).orderBy(asc(s.projects.number)),
-    db.query.costTransactions.findMany({ where: eq(s.costTransactions.pendingPush, true), with: { project: true, costCode: true, vendor: true }, orderBy: desc(s.costTransactions.assignedAt), limit: 10 }),
+    activeProjects(company.id),
+    db.query.costTransactions.findMany({ where: and(eq(s.costTransactions.companyId, company.id), eq(s.costTransactions.pendingPush, true)), with: { project: true, costCode: true, vendor: true }, orderBy: desc(s.costTransactions.assignedAt), limit: 10 }),
   ]);
   return (
     <div className="mx-auto max-w-7xl">

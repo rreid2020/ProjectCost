@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // PGlite ships a WASM Postgres; load it from node_modules rather than bundling it.
+  serverExternalPackages: ["@electric-sql/pglite"],
 };
 
 export default nextConfig;

@@ -1,34 +1,29 @@
 /**
- * Seeds a fictional Ontario mechanical subcontractor with five projects in different states.
- * Run: npm run seed   (drops and recreates the local SQLite database)
+ * Sample data: a fictional Ontario mechanical subcontractor with six projects in different states.
+ * loadDemoData() fills an existing (empty) company; used by onboarding ("start with sample data") and tests.
  */
-import { mkdirSync, rmSync, existsSync } from "node:fs";
-import { drizzle } from "drizzle-orm/libsql";
-import { migrate } from "drizzle-orm/libsql/migrator";
-import { createClient } from "@libsql/client";
-import * as s from "../src/db/schema";
+import type { DB } from "./index";
+import * as s from "./schema";
+import { eq } from "drizzle-orm";
 
-const file = "./data/projectcost.db";
-mkdirSync("./data", { recursive: true });
-for (const f of [file, file + "-journal", file + "-wal", file + "-shm"]) if (existsSync(f)) rmSync(f);
-const db = drizzle(createClient({ url: "file:" + file }), { schema: s });
-
-// deterministic PRNG so demo numbers are stable
-let seed = 42;
-const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
-const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (d: string, n: number) => { const x = new Date(d + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return iso(x); };
-const now = new Date().toISOString();
 
-async function main() {
-  await migrate(db, { migrationsFolder: "./drizzle" });
+async function insertChunked<T extends Record<string, unknown>>(db: DB, table: Parameters<DB["insert"]>[0], rows: T[], size = 500) {
+  for (let i = 0; i < rows.length; i += size) await db.insert(table).values(rows.slice(i, i + size) as never);
+}
 
-  const [co] = await db.insert(s.companies).values({
-    name: "Northline Mechanical Ltd.", region: "CA", province: "ON", fiscalYearEndMonth: 12,
-    closedThrough: "2026-08-31", defaultHoldbackBp: 1000, defaultTaxBp: 1300,
-  }).returning();
+export async function loadDemoData(db: DB, companyId: string) {
+  // deterministic PRNG so demo numbers are stable
+  let seed = 42;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)];
+  const now = new Date().toISOString();
+  const co = { id: companyId };
+  const timeRows: (typeof s.timeEntries.$inferInsert)[] = [];
+  const costRows: (typeof s.costTransactions.$inferInsert)[] = [];
 
+  await db.update(s.companies).set({ closedThrough: "2026-08-31" }).where(eq(s.companies.id, companyId));
   const codeDefs: [string, string, string][] = [
     ["01-100", "Project management & supervision", "LABOUR"],
     ["01-500", "Temporary facilities & site setup", "OTHER"],
@@ -107,13 +102,13 @@ async function main() {
     const costBudget = p.contract * (1 - p.margin);
     const budgetByCode: Record<string, number> = {};
     for (const [code, share] of Object.entries(mix)) budgetByCode[code] = Math.round((costBudget * share) / 100) * 100;
-    await db.insert(s.budgetLines).values(Object.entries(budgetByCode).map(([code, amt]) => ({ projectId: proj.id, costCodeId: C[code].id, originalCents: amt * 100 })));
+    await db.insert(s.budgetLines).values(Object.entries(budgetByCode).map(([code, amt]) => ({ companyId, projectId: proj.id, costCodeId: C[code].id, originalCents: amt * 100 })));
 
     // change orders
     let coNo = 1; const coBudget: Record<string, number> = {}; let coRev = 0;
     for (const c of p.cos ?? []) {
-      const [row] = await db.insert(s.changeOrders).values({ projectId: proj.id, number: coNo++, title: c.title, status: c.status, contractAmountCents: c.rev * 100, dateIssued: c.date, dateApproved: c.status === "APPROVED" ? addDays(c.date, 9) : null }).returning();
-      await db.insert(s.changeOrderLines).values(c.lines.map(([code, amt]) => ({ changeOrderId: row.id, costCodeId: C[code].id, costCents: amt * 100 })));
+      const [row] = await db.insert(s.changeOrders).values({ companyId, projectId: proj.id, number: coNo++, title: c.title, status: c.status, contractAmountCents: c.rev * 100, dateIssued: c.date, dateApproved: c.status === "APPROVED" ? addDays(c.date, 9) : null }).returning();
+      await db.insert(s.changeOrderLines).values(c.lines.map(([code, amt]) => ({ companyId, changeOrderId: row.id, costCodeId: C[code].id, costCents: amt * 100 })));
       if (c.status === "APPROVED") { coRev += c.rev; for (const [code, amt] of c.lines) coBudget[code] = (coBudget[code] ?? 0) + amt; }
     }
 
@@ -136,8 +131,8 @@ async function main() {
             const hrs = code === "01-100" ? pick([4, 6, 8]) : pick([7.5, 8, 8, 9, 10]);
             const cost = hrs * (e.payRateCents / 100) * (1 + e.burdenBp / 10000);
             spent += cost;
-            await db.insert(s.timeEntries).values({
-              employeeId: e.id, projectId: proj.id, costCodeId: C[code].id, date: d, hoursX100: Math.round(hrs * 100),
+            timeRows.push({
+              companyId, employeeId: e.id, projectId: proj.id, costCodeId: C[code].id, date: d, hoursX100: Math.round(hrs * 100),
               payRateCents: e.payRateCents, burdenBp: e.burdenBp, billRateCents: e.billRateCents,
               status: d > "2026-09-18" ? "SUBMITTED" : "APPROVED",
             });
@@ -156,7 +151,7 @@ async function main() {
           remaining -= amt;
           const date = addDays(p.start, Math.round(((i + 0.5) / n) * spanDays * (0.85 + rnd() * 0.1)));
           const vendor = code === "23-300" ? "Precision Sheet Metal Ltd." : code === "23-400" ? "Summit Controls Inc." : code === "23-500" ? "ThermaWrap Insulation" : code === "23-900" ? "Accu-Air Balancing" : pick(vlist);
-          await db.insert(s.costTransactions).values({
+          costRows.push({
             companyId: co.id, projectId: proj.id, costCodeId: C[code].id, vendorId: V[vendor].id, date: date > endActual ? endActual : date,
             source: def.costType === "SUB" || def.costType === "MATERIAL" ? "BILL" : pick(["BILL", "EXPENSE", "CHECK"]),
             docNumber: `${vendor.slice(0, 3).toUpperCase()}-${10000 + Math.floor(rnd() * 89999)}`,
@@ -178,13 +173,13 @@ async function main() {
     for (const [i, [desc, share]] of sovDefs.entries()) {
       const val = i === sovDefs.length - 1 ? p.contract - alloc : Math.round(p.contract * share);
       alloc += val;
-      const [row] = await db.insert(s.sovLines).values({ projectId: proj.id, lineNo: lineNo++, description: desc, scheduledValueCents: val * 100 }).returning();
+      const [row] = await db.insert(s.sovLines).values({ companyId, projectId: proj.id, lineNo: lineNo++, description: desc, scheduledValueCents: val * 100 }).returning();
       sov.push(row);
     }
     let coNum = 1;
     for (const c of p.cos ?? []) {
       if (c.status === "APPROVED") {
-        const [row] = await db.insert(s.sovLines).values({ projectId: proj.id, lineNo: lineNo++, description: `CO #${coNum}: ${c.title}`, scheduledValueCents: c.rev * 100, changeOrderNumber: coNum }).returning();
+        const [row] = await db.insert(s.sovLines).values({ companyId, projectId: proj.id, lineNo: lineNo++, description: `CO #${coNum}: ${c.title}`, scheduledValueCents: c.rev * 100, changeOrderNumber: coNum }).returning();
         sov.push(row);
       }
       coNum++;
@@ -233,21 +228,21 @@ async function main() {
         return { sovLineId: l.id, thisPeriodCents: thisP };
       }).filter((l) => l.thisPeriodCents > 0);
       if (!lines.length) continue;
-      const [bill] = await db.insert(s.progressBills).values({ projectId: proj.id, number: billNo, periodEnd: pe, status: "POSTED", qboInvoiceId: `INV-${p.number.slice(2)}-${billNo}` }).returning();
+      const [bill] = await db.insert(s.progressBills).values({ companyId, projectId: proj.id, number: billNo, periodEnd: pe, status: "POSTED", qboInvoiceId: `INV-${p.number.slice(2)}-${billNo}` }).returning();
       billNo++;
-      await db.insert(s.progressBillLines).values(lines.map((l) => ({ ...l, progressBillId: bill.id })));
+      await db.insert(s.progressBillLines).values(lines.map((l) => ({ ...l, companyId, progressBillId: bill.id })));
       for (const l of lines) prev[l.sovLineId] = (prev[l.sovLineId] ?? 0) + l.thisPeriodCents;
     }
 
     // PM forecasts where the job is in trouble
     if (p.number === "P-2406") {
       await db.insert(s.forecasts).values([
-        { projectId: proj.id, costCodeId: C["23-100"].id, etcCents: 62_000_00, updatedAt: now },
-        { projectId: proj.id, costCodeId: C["23-200"].id, etcCents: 21_000_00, updatedAt: now },
+        { companyId, projectId: proj.id, costCodeId: C["23-100"].id, etcCents: 62_000_00, updatedAt: now },
+        { companyId, projectId: proj.id, costCodeId: C["23-200"].id, etcCents: 21_000_00, updatedAt: now },
       ]);
     }
     if (p.number === "P-2403") {
-      await db.insert(s.forecasts).values([{ projectId: proj.id, costCodeId: C["23-300"].id, etcCents: 118_000_00, updatedAt: now }]);
+      await db.insert(s.forecasts).values([{ companyId, projectId: proj.id, costCodeId: C["23-300"].id, etcCents: 118_000_00, updatedAt: now }]);
     }
   }
 
@@ -262,14 +257,13 @@ async function main() {
     ["2026-09-09", "Accu-Air Balancing", 3_400, "Pre-balance site visit"],
   ];
   for (const [date, vendor, amt, desc] of un) {
-    await db.insert(s.costTransactions).values({
+    costRows.push({
       companyId: co.id, vendorId: V[vendor].id, date, source: "BILL", docNumber: `${vendor.slice(0, 3).toUpperCase()}-${20000 + Math.floor(rnd() * 70000)}`,
       description: desc, amountCents: Math.round(amt * 100), taxCents: Math.round(amt * 13), qboTxnId: String(5000 + Math.floor(rnd() * 4000)),
     });
   }
 
-  await db.insert(s.syncLogs).values({ companyId: co.id, entity: "System", direction: "PULL", status: "OK", message: "Demo data seeded — QBO not connected yet", createdAt: now });
-  console.log("Seeded:", file);
+  await insertChunked(db, s.timeEntries, timeRows);
+  await insertChunked(db, s.costTransactions, costRows);
+  await db.insert(s.syncLogs).values({ companyId: co.id, entity: "System", direction: "PULL", status: "OK", message: "Sample data loaded — QBO not connected yet", createdAt: now });
 }
-
-main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

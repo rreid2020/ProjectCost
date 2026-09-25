@@ -1,18 +1,19 @@
 import { db, schema as s } from "@/db";
 import { and, eq, asc, desc } from "drizzle-orm";
-import { getCompany, getCostCodes } from "@/lib/queries";
+import { activeProjects, getCostCodes } from "@/lib/queries";
+import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, M, Empty } from "@/components/ui";
 import { fmtDate, hours } from "@/lib/format";
 import { labourCost } from "@/lib/engine";
 import { addTimeEntry, approveTime } from "@/app/actions";
 
 export default async function Time() {
-  const company = await getCompany();
+  const { company } = await getTenant();
   const [emps, projects, codes, pending] = await Promise.all([
     db.select().from(s.employees).where(eq(s.employees.companyId, company.id)).orderBy(asc(s.employees.name)),
-    db.select().from(s.projects).where(and(eq(s.projects.companyId, company.id), eq(s.projects.status, "ACTIVE"))).orderBy(asc(s.projects.number)),
+    activeProjects(company.id),
     getCostCodes(company.id),
-    db.query.timeEntries.findMany({ where: eq(s.timeEntries.status, "SUBMITTED"), with: { employee: true, project: true, costCode: true }, orderBy: desc(s.timeEntries.date) }),
+    db.query.timeEntries.findMany({ where: and(eq(s.timeEntries.companyId, company.id), eq(s.timeEntries.status, "SUBMITTED")), with: { employee: true, project: true, costCode: true }, orderBy: desc(s.timeEntries.date) }),
   ]);
   const labourCodes = codes.filter((c) => c.costType === "LABOUR");
   const today = new Date().toISOString().slice(0, 10);

@@ -3,13 +3,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  { href: "/", label: "Dashboard" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/projects", label: "Projects" },
   { href: "/costs", label: "Unassigned costs", badgeKey: "unassigned" },
   { href: "/time", label: "Timesheets", badgeKey: "pendingTime" },
   { href: "/wip", label: "WIP & month-end" },
   { href: "/cost-codes", label: "Cost codes" },
   { href: "/settings", label: "QuickBooks & settings" },
+  { href: "/team", label: "Team" },
+  { href: "/billing", label: "Billing" },
 ];
 
 export function Nav({ counts }: { counts: Record<string, number> }) {
@@ -17,7 +19,7 @@ export function Nav({ counts }: { counts: Record<string, number> }) {
   return (
     <nav className="flex flex-col gap-0.5 px-2">
       {items.map((i) => {
-        const active = i.href === "/" ? path === "/" : path.startsWith(i.href);
+        const active = path.startsWith(i.href);
         const n = i.badgeKey ? counts[i.badgeKey] : 0;
         return (
           <Link key={i.href} href={i.href}

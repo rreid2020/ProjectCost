@@ -43,3 +43,6 @@ next-env.d.ts
 
 # local database
 /data/
+
+# clerk keyless dev keys
+/.clerk/

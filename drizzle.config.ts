@@ -1,8 +1,8 @@
 import { defineConfig } from "drizzle-kit";
 
+// Only `drizzle-kit generate` is used (it needs no database). Migrations are applied by `npm run db:migrate`.
 export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
-  dialect: "sqlite",
-  dbCredentials: { url: process.env.DATABASE_URL ?? "file:./data/projectcost.db" },
+  dialect: "postgresql",
 });

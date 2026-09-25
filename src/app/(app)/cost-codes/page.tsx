@@ -1,9 +1,10 @@
-import { getCompany, getCostCodes } from "@/lib/queries";
+import { getCostCodes } from "@/lib/queries";
+import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, Badge } from "@/components/ui";
 import { addCostCode } from "@/app/actions";
 
 export default async function CostCodes() {
-  const company = await getCompany();
+  const { company, isAdmin } = await getTenant();
   const codes = await getCostCodes(company.id);
   return (
     <div className="mx-auto max-w-5xl">
@@ -17,7 +18,7 @@ export default async function CostCodes() {
             ))}</tbody>
           </table>
         </Card>
-        <Card title="Add cost code">
+        {isAdmin ? <Card title="Add cost code">
           <form action={addCostCode} className="grid gap-3 p-4 text-sm">
             <label className="grid gap-1"><span className="text-xs text-slate-600">Code</span><input name="code" required className="input" placeholder="23-600" /></label>
             <label className="grid gap-1"><span className="text-xs text-slate-600">Name</span><input name="name" required className="input" placeholder="Hydronic piping" /></label>
@@ -25,7 +26,7 @@ export default async function CostCodes() {
               <select name="costType" className="input">{["LABOUR", "MATERIAL", "SUB", "EQUIPMENT", "OTHER"].map((t) => <option key={t}>{t}</option>)}</select></label>
             <button className="btn justify-center">Add</button>
           </form>
-        </Card>
+        </Card> : <Card title="Add cost code"><p className="p-4 text-sm text-slate-500">Only organization admins can change the cost-code library.</p></Card>}
       </div>
     </div>
   );

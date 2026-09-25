@@ -1,25 +1,58 @@
 # ProjectCost — job costing for QuickBooks Online
 
-Milestone 1: the core costing engine and the **Construction & trades** module, running on demo data
+Multi-tenant SaaS job costing for contractors. Milestone 1: the core costing engine and the **Construction & trades** module, with sample data
 (a fictional Ontario mechanical subcontractor, Northline Mechanical Ltd.). The QuickBooks connection comes in milestone 2.
+
+## How it's put together (multi-tenant SaaS)
+
+- **Tenant = company = Clerk organization.** A user signs up, creates (or is invited to) an organization, and onboarding
+  creates the matching `company` row with a 14-day free trial. People can belong to several companies and switch in the sidebar.
+- **Isolation.** Every tenant-owned table has `company_id`, and references between tenant rows are composite foreign keys
+  (`(company_id, project_id) → project(company_id, id)`), so the database refuses cross-company links. All pages and server
+  actions get the company from `getTenant()` / `requireWrite()` / `requireAdmin()` in `src/lib/tenant.ts` and filter by it.
+  `tests/tenancy.test.ts` runs the real server actions as company A against company B's IDs.
+- **Roles.** Clerk `org:admin` manages company settings, billing, the cost-code library and the month-end WIP close; `org:member` does the day-to-day work.
+- **Billing.** Stripe Checkout per company, customer portal for plan changes/cancellation, webhook at `/api/stripe/webhook`.
+  Plans live in `src/lib/plans.ts`. A company whose trial ended or whose subscription lapsed is sent to `/billing`.
+- **Database.** Postgres. Production uses Neon; local dev and tests use PGlite (Postgres compiled to WASM, stored in `./data/pglite`), so nothing to install.
 
 ## Run it on your computer (Windows)
 
-You need **Node.js 20 or newer**. Check with `node -v` in a terminal. If it's missing, install the LTS version from nodejs.org.
+You need **Node.js 20 or newer** and **Clerk development keys** (free):
 
-Open a terminal (PowerShell) in this folder, then run:
+1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com). Under **Organizations**, turn organizations on and turn
+   **personal accounts off** (every user must belong to a company).
+2. Copy `.env.example` to `.env.local` and paste the two keys from **API keys** into `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`.
+3. Then:
 
 ```powershell
 npm install
-copy .env.example .env.local
-npm run seed      # creates data\projectcost.db with the demo company
-npm run dev       # starts the app
+npm run db:migrate   # creates the local database in data\pglite
+npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000, sign up, create a company and tick **Start with sample data** to get the demo projects.
+Or double-click `Start ProjectCost.bat`, which does all of this.
 
-- `npm run seed` resets the demo data at any time.
-- `npm test` runs the engine tests (WIP, burden, holdback, loss provision, journal entries).
+- `npm test` runs the engine, billing-rule and tenant-isolation tests.
+- `npm run db:reset-local` wipes the local database (stop `npm run dev` first).
+- After changing `src/db/schema.ts`, run `npm run db:generate` to write a new migration.
+
+Stripe is optional locally: without keys the app runs on the free trial and the Billing page says Stripe isn't configured.
+To test payments, put test-mode keys in `.env.local` and forward webhooks with the Stripe CLI:
+`stripe listen --forward-to localhost:3000/api/stripe/webhook` (it prints the `STRIPE_WEBHOOK_SECRET` to use).
+
+## Deploy (Vercel + Neon)
+
+1. **Neon:** create a project and copy the **pooled** connection string.
+2. **Clerk:** create a production instance for your domain (organizations on, personal accounts off). Add a webhook endpoint
+   `https://<your-domain>/api/clerk/webhook` for `organization.updated` and `organization.deleted`.
+3. **Stripe:** create a product with a recurring price per plan (Starter, Pro). Turn on the **customer portal** (Settings → Billing → Customer portal)
+   and allow plan switching between those prices. Add a webhook endpoint `https://<your-domain>/api/stripe/webhook` for
+   `checkout.session.completed` and `customer.subscription.created/updated/deleted/paused/resumed`.
+4. **Vercel:** import the repo and set the environment variables from `.env.example` (`DATABASE_URL`, Clerk keys, `CLERK_WEBHOOK_SIGNING_SECRET`,
+   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`, `APP_URL`). `vercel.json` runs the database
+   migrations before each build.
 
 ## What's in milestone 1
 
@@ -50,11 +83,17 @@ Engine code: `src/lib/engine.ts` (pure functions). Tests: `tests/engine.test.ts`
 ## Project layout
 
 ```
-src/db/schema.ts         data model (Drizzle ORM; SQLite locally, Postgres in production)
+src/db/schema.ts         data model (Drizzle ORM, Postgres; PGlite locally)
+src/db/demo.ts           sample company data (loaded from onboarding)
+src/lib/tenant.ts        resolves the signed-in user's company; used by every page and action
+src/lib/plans.ts         plans, trial length, subscription access rules
+src/lib/stripe.ts        Stripe client + subscription sync
 src/lib/engine.ts        costing engine: roll-ups, WIP, billing, journal entries
 src/lib/queries.ts       loads a project from the DB and runs the engine
-src/app/                 Next.js pages + server actions (actions.ts)
-scripts/seed.ts          demo data
+src/app/(app)/           signed-in app pages          src/app/(marketing)/  public landing page
+src/app/onboarding/      company setup                src/app/api/          Stripe + Clerk webhooks
+src/app/*actions.ts      server actions
+scripts/                 migrate + local reset
 drizzle/                 SQL migrations (regenerate with `npm run db:generate` after schema changes)
 ```
 
@@ -62,7 +101,8 @@ drizzle/                 SQL migrations (regenerate with `npm run db:generate` a
 
 1. At developer.intuit.com, open your app → **Keys & credentials** (Development/sandbox).
 2. Add the redirect URI `http://localhost:3000/api/qbo/callback`.
-3. Put the Client ID and Client Secret into `.env.local`, **not** `.env.example`, and never paste them into chat or commit them.
+3. Put the Client ID and Client Secret into `.env.local` (and Vercel), **not** `.env.example`, and never paste them into chat or commit them.
+   Each company connects its own QuickBooks file; tokens will be stored per company, encrypted.
 4. Keep the sandbox company handy. Milestone 2 will import its customers, projects, bills, purchases and time, then write back cost codes, time, invoices and JEs.
 
 Note: Intuit only opens the QBO **Projects API** to App Partner Program **Silver tier or higher**. Until then, milestone 2 treats QBO sub-customers (jobs) as projects.

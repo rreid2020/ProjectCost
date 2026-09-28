@@ -7,6 +7,7 @@ const items = [
   { href: "/projects", label: "Projects" },
   { href: "/costs", label: "Unassigned costs", badgeKey: "unassigned" },
   { href: "/time", label: "Timesheets", badgeKey: "pendingTime" },
+  { href: "/employees", label: "Employees" },
   { href: "/wip", label: "WIP & month-end" },
   { href: "/cost-codes", label: "Cost codes" },
   { href: "/settings", label: "QuickBooks & settings" },

@@ -46,3 +46,6 @@ next-env.d.ts
 
 # clerk keyless dev keys
 /.clerk/
+
+# local exploration scripts
+/scratch/

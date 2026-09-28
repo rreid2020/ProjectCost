@@ -1,5 +1,5 @@
 import { Card, M, StatusBadge, Empty } from "@/components/ui";
-import { fmtDate, pct } from "@/lib/format";
+import { fmtDate, money, pct } from "@/lib/format";
 import { progressBill } from "@/lib/engine";
 import type { LoadedProject } from "@/lib/queries";
 import { postProgressBill, deleteProgressBill } from "@/app/actions";
@@ -20,7 +20,11 @@ export function BillingTab({ data }: { data: LoadedProject }) {
 
   return (
     <div className="grid gap-5">
-      {hasDraft ? (
+      {sov.length === 0 ? (
+        <Card title="Progress billing">
+          <p className="px-4 py-3 text-sm text-slate-600">This project has no schedule of values yet, so progress bills can&apos;t be drafted here.{data.qboInvoices.length ? " Invoices raised in QuickBooks are listed below and count toward billed to date." : ""}</p>
+        </Card>
+      ) : hasDraft ? (
         <Card title="Draft progress bill">
           <p className="px-4 py-3 text-sm text-slate-600">There is a draft bill below. Post or delete it before starting the next one.</p>
         </Card>
@@ -30,6 +34,18 @@ export function BillingTab({ data }: { data: LoadedProject }) {
             projectId={p.id} periodEnd={eom} holdbackBp={p.holdbackBp} taxBp={p.taxBp} pctCompleteBp={data.econ.pctCompleteBp}
             lines={sov.map((l) => ({ sovLineId: l.id, lineNo: l.lineNo, description: l.description, scheduledValue: l.scheduledValueCents, previouslyBilled: prevByLine.get(l.id) ?? 0, thisPeriod: 0 }))}
           />
+        </Card>
+      )}
+
+      {data.qboInvoices.length > 0 && (
+        <Card title="Invoiced in QuickBooks" action={<span className="text-xs text-slate-500">Pre-tax · counts toward billed to date · {money(data.billedInQbo)}</span>}>
+          <table className="grid-table">
+            <thead><tr><th>Date</th><th>Type</th><th>Number</th><th className="num">Amount (pre-tax)</th></tr></thead>
+            <tbody>{data.qboInvoices.map((i) => (
+              <tr key={i.id}><td className="text-xs">{fmtDate(i.date)}</td><td className="text-xs">{i.qboTxnType === "CreditMemo" ? "Credit memo" : "Invoice"}</td>
+                <td className="font-mono text-xs">{i.docNumber ?? i.qboTxnId}</td><td className="num"><M v={i.amountCents} cents /></td></tr>
+            ))}</tbody>
+          </table>
         </Card>
       )}
 

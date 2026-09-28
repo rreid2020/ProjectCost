@@ -1,0 +1,203 @@
+// QuickBooks import against fixtures shaped like the CA sandbox's records, into an in-memory Postgres.
+import { describe, it, expect, vi, beforeAll } from "vitest";
+import { and, eq } from "drizzle-orm";
+
+vi.mock("server-only", () => ({}));
+
+import { db, migrateDb, schema as s } from "@/db";
+import { loadDemoData } from "@/db/demo";
+import { loadProject } from "@/lib/queries";
+import { runImport, projectIdentity, type QboQuery, type QboRecord } from "@/lib/qbo-import";
+
+const NOW = new Date("2026-09-28T12:00:00Z");
+
+function fixtures() {
+  const item = (id: string, name: string, customer?: [string, string]) => ({ ItemRef: { value: id, name }, ...(customer ? { CustomerRef: { value: customer[0], name: customer[1] } } : {}) });
+  const retreat: [string, string] = ["66", "Oxon - Retreat"];
+  return {
+    Account: [{ Id: "44", AccountType: "Cost of Goods Sold", Name: "Cost of sales" }, { Id: "91", AccountType: "Expense", Name: "Janitorial Expense" }],
+    Item: [
+      { Id: "13", Type: "Service", Name: "Misc", ExpenseAccountRef: { value: "44" } },
+      { Id: "2", Type: "Service", Name: "Hours" },
+      { Id: "21", Type: "Inventory", Sku: "NB-476", Name: "Name Badges", ExpenseAccountRef: { value: "44" } },
+      { Id: "23", Type: "Category", Name: "Employee events" },
+    ],
+    Customer: [
+      { Id: "2", DisplayName: "Oxon Insurance Agency", Job: false, Active: true },
+      { Id: "66", DisplayName: "Oxon - Retreat", Job: true, ParentRef: { value: "2" }, Active: true },
+      { Id: "70", DisplayName: "0969 Ocean View Road", Job: true, ParentRef: { value: "2" }, Active: false },
+      { Id: "10", DisplayName: "Lew Plumbing", Job: false, Active: true },
+      { Id: "99", DisplayName: "Idle Customer", Job: false, Active: true },
+    ],
+    Vendor: [{ Id: "35", DisplayName: "Jennifer Hargreaves" }],
+    Employee: [{ Id: "55", DisplayName: "Pat Fitter", CostRate: 42, BillRate: 95 }],
+    Bill: [
+      // overhead: expense account, no customer
+      { Id: "98", TxnDate: "2026-03-10", VendorRef: { value: "35" }, TxnTaxDetail: { TotalTax: 26 },
+        Line: [{ Id: "1", Amount: 200, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: "91", name: "Janitorial Expense" } } }] },
+      { Id: "97", TxnDate: "2026-08-05", DocNumber: "B-97", VendorRef: { value: "35" }, TxnTaxDetail: { TotalTax: 45 },
+        Line: [
+          { Id: "1", Amount: 262.5, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: item("13", "Misc", retreat) },
+          { Id: "2", Amount: 187.5, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: item("13", "Misc", ["10", "Lew Plumbing"]) },
+        ] },
+      // COGS with no customer: job cost that needs coding
+      { Id: "96", TxnDate: "2026-08-06", VendorRef: { value: "35" },
+        Line: [{ Id: "1", Amount: 50, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: "44", name: "Cost of sales" } } }] },
+    ] as QboRecord[],
+    Purchase: [
+      { Id: "44", TxnDate: "2026-06-01", PaymentType: "Check", DocNumber: "2076", EntityRef: { type: "Vendor", value: "35" },
+        Line: [{ Id: "1", Amount: 1000, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: item("21", "Name Badges", retreat) }] },
+      { Id: "45", TxnDate: "2026-06-02", PaymentType: "CreditCard", Credit: true,
+        Line: [{ Id: "1", Amount: 100, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: item("13", "Misc", retreat) }] },
+    ] as QboRecord[],
+    VendorCredit: [] as QboRecord[],
+    TimeActivity: [
+      { Id: "7", TxnDate: "2026-09-01", NameOf: "Employee", EmployeeRef: { value: "55" }, CustomerRef: { value: "66" }, ItemRef: { value: "2" }, Hours: 7, Minutes: 30 },
+      { Id: "8", TxnDate: "2026-09-02", NameOf: "Employee", EmployeeRef: { value: "55" }, Hours: 8 }, // no job: skipped
+      { Id: "9", TxnDate: "2026-09-02", NameOf: "Vendor", VendorRef: { value: "35" }, CustomerRef: { value: "66" }, Hours: 4 }, // vendor time: skipped
+    ],
+    Invoice: [
+      { Id: "126", TxnDate: "2026-07-01", DocNumber: "1037", CustomerRef: { value: "66" }, TotalAmt: 11300, TxnTaxDetail: { TotalTax: 1300 } },
+      { Id: "130", TxnDate: "2026-07-02", CustomerRef: { value: "10" }, TotalAmt: 565, TxnTaxDetail: { TotalTax: 65 } },
+    ],
+    CreditMemo: [{ Id: "140", TxnDate: "2026-07-15", CustomerRef: { value: "66" }, TotalAmt: 113, TxnTaxDetail: { TotalTax: 13 } }],
+    Estimate: [
+      { Id: "5", CustomerRef: { value: "66" }, TxnStatus: "Accepted", TotalAmt: 56500, TxnTaxDetail: { TotalTax: 6500 } },
+      { Id: "6", CustomerRef: { value: "66" }, TxnStatus: "Pending", TotalAmt: 1000 },
+    ],
+  };
+}
+
+const queryFor = (data: Record<string, QboRecord[]>): QboQuery => async (entity) => structuredClone(data[entity] ?? []);
+
+async function newCompany(name: string, extra: Partial<typeof s.companies.$inferInsert> = {}) {
+  const [c] = await db.insert(s.companies).values({ name, clerkOrgId: `org_${name}`, qboProjectMode: "jobs", ...extra }).returning();
+  return c;
+}
+const rows = {
+  projects: (c: string) => db.select().from(s.projects).where(eq(s.projects.companyId, c)),
+  costs: (c: string) => db.select().from(s.costTransactions).where(eq(s.costTransactions.companyId, c)),
+  time: (c: string) => db.select().from(s.timeEntries).where(eq(s.timeEntries.companyId, c)),
+  codes: (c: string) => db.select().from(s.costCodes).where(eq(s.costCodes.companyId, c)),
+};
+
+beforeAll(async () => { await migrateDb(); });
+
+describe("guards", () => {
+  it("refuses a workspace that still has sample data, or no project mode", async () => {
+    const sample = await newCompany("Sample");
+    await loadDemoData(db, sample.id);
+    await expect(runImport({ companyId: sample.id, query: queryFor(fixtures()), now: NOW })).rejects.toThrow("sample data");
+    const noMode = await newCompany("NoMode", { qboProjectMode: null });
+    await expect(runImport({ companyId: noMode.id, query: queryFor(fixtures()), now: NOW })).rejects.toThrow("Choose how projects");
+  });
+  it("derives project numbers from job names", () => {
+    const taken = new Set<string>(["QB-1"]);
+    expect(projectIdentity({ Id: "70", DisplayName: "0969 Ocean View Road" }, taken)).toEqual({ number: "0969", name: "Ocean View Road" });
+    expect(projectIdentity({ Id: "66", DisplayName: "Oxon - Retreat" }, taken)).toEqual({ number: "QB-66", name: "Oxon - Retreat" });
+    expect(projectIdentity({ Id: "71", DisplayName: "0969 Ocean View Road" }, taken).number).toBe("0969-71");
+  });
+});
+
+describe("jobs mode, Canadian company", () => {
+  let c: string, summary: Awaited<ReturnType<typeof runImport>>;
+  beforeAll(async () => {
+    c = (await newCompany("Jobs")).id;
+    summary = await runImport({ companyId: c, query: queryFor(fixtures()), now: NOW });
+  });
+
+  it("makes projects from sub-customers only, with numbers, status and contract from accepted estimates", async () => {
+    const ps = await rows.projects(c);
+    expect(ps.map((p) => p.qboProjectId).sort()).toEqual(["66", "70"]);
+    const retreat = ps.find((p) => p.qboProjectId === "66")!, ocean = ps.find((p) => p.qboProjectId === "70")!;
+    expect(retreat).toMatchObject({ number: "QB-66", name: "Oxon - Retreat", status: "ACTIVE", originalContractCents: 50_000_00 });
+    expect(ocean).toMatchObject({ number: "0969", name: "Ocean View Road", status: "COMPLETE" });
+    const cust = await db.query.customers.findFirst({ where: eq(s.customers.id, retreat.customerId) });
+    expect(cust!.name).toBe("Oxon Insurance Agency"); // root customer
+    expect(summary).toMatchObject({ customers: 3, projects: 2, newProjects: 2, vendors: 1, employees: 1 });
+  });
+
+  it("turns items (not categories) into cost codes with a guessed type", async () => {
+    const codes = await rows.codes(c);
+    const byItem = Object.fromEntries(codes.map((x) => [x.qboItemId, x]));
+    expect(Object.keys(byItem).sort()).toEqual(["13", "2", "21"]);
+    expect(byItem["2"].costType).toBe("LABOUR");
+    expect(byItem["21"]).toMatchObject({ code: "NB-476", costType: "MATERIAL" });
+  });
+
+  it("imports job-cost lines, skips overhead, allocates recoverable tax, and signs refunds", async () => {
+    const costs = await rows.costs(c);
+    expect(summary.overheadSkipped).toBe(1);
+    expect(costs).toHaveLength(5);
+    const key = (t: string, id: string, line = "1") => costs.find((x) => x.qboTxnType === t && x.qboTxnId === id && x.qboLineId === line)!;
+    const retreat = (await rows.projects(c)).find((p) => p.qboProjectId === "66")!;
+    expect(key("Bill", "97")).toMatchObject({ projectId: retreat.id, amountCents: 262_50, taxCents: 26_25, source: "BILL", docNumber: "B-97" });
+    expect(key("Bill", "97", "2")).toMatchObject({ projectId: null, qboCustomerName: "Lew Plumbing", amountCents: 187_50, taxCents: 18_75 });
+    expect(key("Bill", "96")).toMatchObject({ projectId: null, costCodeId: null, amountCents: 50_00 });
+    expect(key("Purchase", "44")).toMatchObject({ source: "CHECK", amountCents: 1000_00 });
+    expect(key("Purchase", "45")).toMatchObject({ source: "EXPENSE", amountCents: -100_00 });
+    expect(summary.needsCoding).toBe(2);
+  });
+
+  it("imports employee time on projects as approved, at the employee's rate", async () => {
+    const time = await rows.time(c);
+    expect(time).toHaveLength(1);
+    expect(time[0]).toMatchObject({ hoursX100: 750, payRateCents: 4200, billRateCents: 9500, status: "APPROVED" });
+    expect(summary.timeSkipped).toBe(2);
+  });
+
+  it("counts QuickBooks invoices and credit memos (pre-tax) as billed to date", async () => {
+    const retreat = (await rows.projects(c)).find((p) => p.qboProjectId === "66")!;
+    const loaded = (await loadProject(c, retreat.id))!;
+    expect(loaded.billedInQbo).toBe(10_000_00 - 100_00);
+    expect(loaded.econ.billedToDate).toBe(9_900_00);
+    expect(summary.invoices).toBe(2); // Lew Plumbing's invoice isn't for a project in jobs mode
+  });
+
+  it("is re-runnable: no duplicates, keeps coding done in ProjectCost, removes what QuickBooks deleted", async () => {
+    const retreat = (await rows.projects(c)).find((p) => p.qboProjectId === "66")!;
+    const misc = (await rows.codes(c)).find((x) => x.qboItemId === "13")!;
+    const lew = (await rows.costs(c)).find((x) => x.qboCustomerName === "Lew Plumbing")!;
+    await db.update(s.costTransactions).set({ projectId: retreat.id, costCodeId: misc.id, pendingPush: true }).where(eq(s.costTransactions.id, lew.id));
+    await db.update(s.projects).set({ name: "Renamed in ProjectCost", originalContractCents: 1 }).where(eq(s.projects.id, retreat.id));
+
+    const data = fixtures();
+    data.Purchase = data.Purchase.filter((p) => p.Id !== "45"); // deleted in QuickBooks
+    const second = await runImport({ companyId: c, query: queryFor(data), now: NOW });
+
+    expect(await rows.projects(c)).toHaveLength(2);
+    expect(await rows.codes(c)).toHaveLength(3);
+    expect(await rows.time(c)).toHaveLength(1);
+    const costs = await rows.costs(c);
+    expect(costs).toHaveLength(4);
+    expect(second.removed).toBe(1);
+    expect(costs.find((x) => x.id === lew.id)).toMatchObject({ projectId: retreat.id, costCodeId: misc.id, pendingPush: true });
+    expect(await db.query.projects.findFirst({ where: eq(s.projects.id, retreat.id) })).toMatchObject({ name: "Renamed in ProjectCost", originalContractCents: 1 });
+  });
+});
+
+describe("customers mode and US tax", () => {
+  it("makes a project of every customer with activity, and adds non-recoverable tax to cost", async () => {
+    const c = (await newCompany("Customers", { qboProjectMode: "customers", region: "US" })).id;
+    await runImport({ companyId: c, query: queryFor(fixtures()), now: NOW });
+    const ps = await rows.projects(c);
+    expect(ps.map((p) => p.qboProjectId).sort()).toEqual(["10", "66"]);
+    const lew = ps.find((p) => p.qboProjectId === "10")!;
+    const line = (await rows.costs(c)).find((x) => x.qboTxnId === "97" && x.qboLineId === "2")!;
+    expect(line).toMatchObject({ projectId: lew.id, amountCents: 187_50 + 18_75, taxCents: 0 });
+  });
+});
+
+describe("tenant isolation", () => {
+  it("never touches another company's rows", async () => {
+    const other = await newCompany("Other", { qboProjectMode: null });
+    await loadDemoData(db, other.id);
+    await db.update(s.companies).set({ sampleDataLoadedAt: null }).where(eq(s.companies.id, other.id));
+    const before = { p: (await rows.projects(other.id)).length, c: (await rows.costs(other.id)).length, t: (await rows.time(other.id)).length };
+    const c = (await newCompany("Importer")).id;
+    await runImport({ companyId: c, query: queryFor(fixtures()), now: NOW });
+    await runImport({ companyId: c, query: queryFor({ ...fixtures(), Bill: [], Purchase: [], TimeActivity: [], Invoice: [], CreditMemo: [] }), now: NOW });
+    expect({ p: (await rows.projects(other.id)).length, c: (await rows.costs(other.id)).length, t: (await rows.time(other.id)).length }).toEqual(before);
+    expect((await db.select().from(s.costTransactions).where(and(eq(s.costTransactions.companyId, c)))).length).toBe(0);
+  });
+});

@@ -24,6 +24,8 @@ export const companies = pgTable("company", {
   qboRealmId: text("qbo_realm_id"),
   qboConnectedAt: text("qbo_connected_at"),
   qboCompanyName: text("qbo_company_name"), // CompanyInfo.CompanyName at connect time
+  qboProjectMode: text("qbo_project_mode"), // what a project is in QuickBooks: "jobs" (sub-customers/Projects) | "customers"
+  qboLastImportAt: text("qbo_last_import_at"),
   defaultHoldbackBp: integer("default_holdback_bp").notNull().default(1000),
   defaultTaxBp: integer("default_tax_bp").notNull().default(1300),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -68,7 +70,11 @@ export const costCodes = pgTable(
     qboItemId: text("qbo_item_id"),
     active: boolean("active").notNull().default(true),
   },
-  (t) => [uniqueIndex("cost_code_company_code").on(t.companyId, t.code), unique("cost_code_tenant").on(t.companyId, t.id)],
+  (t) => [
+    uniqueIndex("cost_code_company_code").on(t.companyId, t.code),
+    unique("cost_code_tenant").on(t.companyId, t.id),
+    uniqueIndex("cost_code_company_qbo").on(t.companyId, t.qboItemId),
+  ],
 );
 
 export const customers = pgTable(
@@ -79,7 +85,7 @@ export const customers = pgTable(
     name: text("name").notNull(),
     qboId: text("qbo_id"),
   },
-  (t) => [unique("customer_tenant").on(t.companyId, t.id)],
+  (t) => [unique("customer_tenant").on(t.companyId, t.id), uniqueIndex("customer_company_qbo").on(t.companyId, t.qboId)],
 );
 
 export const vendors = pgTable(
@@ -90,7 +96,7 @@ export const vendors = pgTable(
     name: text("name").notNull(),
     qboId: text("qbo_id"),
   },
-  (t) => [unique("vendor_tenant").on(t.companyId, t.id)],
+  (t) => [unique("vendor_tenant").on(t.companyId, t.id), uniqueIndex("vendor_company_qbo").on(t.companyId, t.qboId)],
 );
 
 export const employees = pgTable(
@@ -106,7 +112,7 @@ export const employees = pgTable(
     qboId: text("qbo_id"),
     active: boolean("active").notNull().default(true),
   },
-  (t) => [unique("employee_tenant").on(t.companyId, t.id)],
+  (t) => [unique("employee_tenant").on(t.companyId, t.id), uniqueIndex("employee_company_qbo").on(t.companyId, t.qboId)],
 );
 
 export const projects = pgTable(
@@ -129,6 +135,7 @@ export const projects = pgTable(
   },
   (t) => [
     uniqueIndex("project_company_number").on(t.companyId, t.number),
+    uniqueIndex("project_company_qbo").on(t.companyId, t.qboProjectId),
     unique("project_tenant").on(t.companyId, t.id),
     foreignKey({ name: "project_customer_fk", columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
   ],
@@ -213,8 +220,10 @@ export const costTransactions = pgTable(
     description: text("description").notNull(),
     amountCents: cents("amount_cents").notNull(), // pre-tax job cost
     taxCents: cents("tax_cents").notNull().default(0), // recoverable ITC (CA) — not job cost
+    qboTxnType: text("qbo_txn_type"), // Bill | Purchase | VendorCredit
     qboTxnId: text("qbo_txn_id"),
     qboLineId: text("qbo_line_id"),
+    qboCustomerName: text("qbo_customer_name"), // the QBO customer/job the line was tagged to, shown when it needs coding
     assignedAt: text("assigned_at"),
     pendingPush: boolean("pending_push").notNull().default(false),
   },
@@ -223,6 +232,7 @@ export const costTransactions = pgTable(
     toCostCode("cost_transaction", t.companyId, t.costCodeId),
     foreignKey({ name: "cost_transaction_vendor_fk", columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
     index("cost_transaction_company_project").on(t.companyId, t.projectId),
+    uniqueIndex("cost_transaction_company_qbo").on(t.companyId, t.qboTxnType, t.qboTxnId, t.qboLineId),
   ],
 );
 
@@ -249,6 +259,7 @@ export const timeEntries = pgTable(
     toCostCode("time_entry", t.companyId, t.costCodeId),
     index("time_entry_company_status").on(t.companyId, t.status),
     index("time_entry_project").on(t.projectId),
+    uniqueIndex("time_entry_company_qbo").on(t.companyId, t.qboTimeActivityId),
   ],
 );
 
@@ -332,6 +343,39 @@ export const syncLogs = pgTable(
   (t) => [index("sync_log_company_created").on(t.companyId, t.createdAt)],
 );
 
+// Invoices and credit memos billed in QuickBooks (outside ProjectCost's progress billing). Count toward billed-to-date.
+export const qboInvoices = pgTable(
+  "qbo_invoice",
+  {
+    id: id(),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
+    qboTxnType: text("qbo_txn_type").notNull(), // Invoice | CreditMemo
+    qboTxnId: text("qbo_txn_id").notNull(),
+    docNumber: text("doc_number"),
+    date: text("date").notNull(),
+    amountCents: cents("amount_cents").notNull(), // pre-tax; negative for credit memos
+  },
+  (t) => [uniqueIndex("qbo_invoice_company_txn").on(t.companyId, t.qboTxnType, t.qboTxnId), toProject("qbo_invoice", t.companyId, t.projectId)],
+);
+
+// One row per QuickBooks import run: progress, outcome and counts for the settings page.
+export const qboImportRuns = pgTable(
+  "qbo_import_run",
+  {
+    id: id(),
+    companyId: companyId(),
+    userId: text("user_id").notNull(),
+    status: text("status").notNull(), // RUNNING | OK | ERROR
+    since: text("since").notNull(),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    summary: text("summary"), // JSON counts
+    error: text("error"),
+  },
+  (t) => [index("qbo_import_run_company_started").on(t.companyId, t.startedAt)],
+);
+
 // Stripe webhook idempotency: each event id is processed once.
 export const stripeEvents = pgTable("stripe_event", {
   id: text("id").primaryKey(),
@@ -349,6 +393,7 @@ export const projectRelations = relations(projects, ({ one, many }) => ({
   forecasts: many(forecasts),
   sovLines: many(sovLines),
   progressBills: many(progressBills),
+  qboInvoices: many(qboInvoices),
 }));
 export const budgetLineRelations = relations(budgetLines, ({ one }) => ({
   project: one(projects, { fields: [budgetLines.projectId], references: [projects.id] }),
@@ -388,3 +433,6 @@ export const progressBillLineRelations = relations(progressBillLines, ({ one }) 
   sovLine: one(sovLines, { fields: [progressBillLines.sovLineId], references: [sovLines.id] }),
 }));
 export const customerRelations = relations(customers, ({ many }) => ({ projects: many(projects) }));
+export const qboInvoiceRelations = relations(qboInvoices, ({ one }) => ({
+  project: one(projects, { fields: [qboInvoices.projectId], references: [projects.id] }),
+}));

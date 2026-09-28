@@ -8,6 +8,7 @@ import { BudgetTab } from "./BudgetTab";
 import { ChangeOrdersTab } from "./ChangeOrdersTab";
 import { BillingTab } from "./BillingTab";
 import { CostsTab, TimeTab } from "./LedgerTabs";
+import { SetupTab } from "./SetupTab";
 
 const TABS = [
   ["budget", "Budget vs. actual"],
@@ -15,11 +16,12 @@ const TABS = [
   ["billing", "Progress billing"],
   ["costs", "Costs"],
   ["time", "Labour"],
+  ["setup", "Setup"],
 ] as const;
 
-export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
+export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; saved?: string }> }) {
   const { id } = await params;
-  const { tab = "budget" } = await searchParams;
+  const { tab = "budget", saved } = await searchParams;
   const { company } = await getTenant();
   const data = await loadProject(company.id, id);
   if (!data) notFound();
@@ -59,6 +61,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         {tab === "billing" && <BillingTab data={data} />}
         {tab === "costs" && <CostsTab data={data} />}
         {tab === "time" && <TimeTab data={data} />}
+        {tab === "setup" && <SetupTab data={data} saved={saved === "1"} />}
       </div>
     </div>
   );

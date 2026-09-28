@@ -114,5 +114,24 @@ Set it up (sandbox first):
 For production: use the Production keys, set `QBO_ENVIRONMENT=production`, and use a different `QBO_TOKEN_KEY` than dev.
 Intuit's app review expects the official "Connect to QuickBooks" button artwork and a disconnect link, both of which should be in place before you submit.
 
-Next: the first import (customers, projects/sub-customers, vendors, items, bills, purchases, time) and write-back.
+### Importing
+
+**QuickBooks & settings → Import from QuickBooks** (admins). The first run asks how jobs are tracked in QuickBooks:
+
+- **Sub-customers / QuickBooks Projects:** each job under a customer becomes a project; costs tagged to the parent customer go to Unassigned costs.
+- **Each customer is a job:** every customer with costs, time, invoices or estimates in the window becomes a project.
+
+What comes in (last 24 months of transactions): customers, projects, vendors, employees, products & services as cost codes (type guessed, editable),
+bill / expense / cheque / vendor-credit lines tagged to a customer or posted to Cost of Goods Sold, employee time on projects, and invoices and
+credit memos (pre-tax) as billed to date. Accepted estimates seed the contract value of new projects. Foreign-currency transactions are converted
+at QuickBooks' exchange rate. In Canada, sales tax on purchases is kept out of job cost (ITC); in the US it's added to cost. Overhead lines with no
+customer are skipped. Nothing is written to QuickBooks.
+
+Re-running ("Sync now") updates in place: nothing is duplicated, coding done in ProjectCost is kept unless QuickBooks has its own value, and
+records deleted in QuickBooks (within the window) are removed. After the first import, set **employee pay rates** (Employees), each project's
+**contract and budget** (project → Setup / Budget), and code anything in **Unassigned costs**.
+
+Not yet: write-back to QuickBooks, webhooks/scheduled sync, journal-entry lines, a schedule-of-values editor for imported projects, and running
+very large imports in the background (they currently run inside the request, up to 5 minutes).
+
 Note: Intuit only opens the QBO **Projects API** to App Partner Program **Silver tier or higher**. Until then, QBO sub-customers (jobs) are treated as projects.

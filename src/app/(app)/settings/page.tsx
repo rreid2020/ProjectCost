@@ -6,7 +6,8 @@ import { fmtDate, pct } from "@/lib/format";
 import { CompanyFields } from "@/components/CompanyFields";
 import { updateCompanySettings } from "@/app/company-actions";
 import { removeSampleData } from "@/app/actions";
-import { disconnectQbo, testQboConnection } from "@/app/qbo-actions";
+import { disconnectQbo, importFromQbo, testQboConnection } from "@/app/qbo-actions";
+import type { ImportSummary } from "@/lib/qbo-import";
 import { qboConfigured, qboEnvironment, redirectUri } from "@/lib/qbo";
 import { appOrigin } from "@/lib/origin";
 
@@ -23,7 +24,20 @@ const QBO_NOTICES: Record<string, { tone: "good" | "warn"; text: string }> = {
   error: { tone: "warn", text: "The connection didn't complete. See the sync log below for details." },
   not_configured: { tone: "warn", text: "Connecting to QuickBooks isn't available yet." },
   admin_only: { tone: "warn", text: "Only organization admins can connect QuickBooks." },
+  imported: { tone: "good", text: "Import finished. See the summary below." },
+  import_failed: { tone: "warn", text: "The import didn't finish, and nothing was changed. See the sync log below." },
+  import_running: { tone: "warn", text: "An import is already running for this company. Try again in a few minutes." },
+  remove_sample: { tone: "warn", text: "Remove the sample data (below) before importing from QuickBooks." },
 };
+
+// Imports run inside the request for now; allow up to 5 minutes (Vercel).
+export const maxDuration = 300;
+
+const SUMMARY_LABELS: [keyof ImportSummary, string][] = [
+  ["projects", "Projects"], ["newProjects", "New projects"], ["customers", "Customers"], ["vendors", "Vendors"], ["employees", "Employees"],
+  ["costCodes", "Cost codes"], ["costLines", "Cost lines"], ["needsCoding", "Lines to code"], ["overheadSkipped", "Overhead lines skipped"],
+  ["timeEntries", "Time entries"], ["timeSkipped", "Time entries skipped"], ["invoices", "Invoices"], ["removed", "Removed (deleted in QBO)"],
+];
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ qbo?: string }> }) {
   const { company, isAdmin } = await getTenant({ allowInactive: true });
@@ -31,6 +45,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const configured = qboConfigured();
   const redirect = redirectUri(await appOrigin());
   const notice = QBO_NOTICES[(await searchParams).qbo ?? ""];
+  const lastRun = await db.query.qboImportRuns.findFirst({ where: eq(s.qboImportRuns.companyId, company.id), orderBy: desc(s.qboImportRuns.startedAt) });
+  const lastSummary: ImportSummary | null = lastRun?.summary ? JSON.parse(lastRun.summary) : null;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -91,6 +107,56 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           )}
         </Card>
       </div>
+      {company.qboRealmId && (
+        <Card title="Import from QuickBooks" className="mt-5" action={company.qboLastImportAt ? <span className="text-xs text-slate-500">Last import {new Date(company.qboLastImportAt).toLocaleString("en-CA")}</span> : undefined}>
+          <div className="grid gap-4 p-4 text-sm">
+            {!isAdmin ? <p className="text-slate-500">An admin runs imports.</p> : company.sampleDataLoadedAt ? (
+              <p className="text-amber-900">Remove the sample data below first, so your QuickBooks data isn&apos;t mixed with it.</p>
+            ) : (
+              <form action={importFromQbo} className="grid gap-3">
+                {!company.qboProjectMode ? (
+                  <fieldset className="grid gap-2">
+                    <legend className="mb-1 font-medium text-slate-800">In QuickBooks, how do you track jobs?</legend>
+                    <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3">
+                      <input type="radio" name="mode" value="jobs" required className="mt-0.5" />
+                      <span><span className="font-medium">As sub-customers or QuickBooks Projects</span>
+                        <span className="block text-xs text-slate-500">e.g. customer &ldquo;Beacon Construction&rdquo; with job &ldquo;2401 Riverside MOB&rdquo; under it. Costs tagged to the parent customer go to Unassigned costs.</span></span>
+                    </label>
+                    <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3">
+                      <input type="radio" name="mode" value="customers" required className="mt-0.5" />
+                      <span><span className="font-medium">Each customer is a job</span>
+                        <span className="block text-xs text-slate-500">Every customer with costs, time, invoices or estimates in the last 24 months becomes a project.</span></span>
+                    </label>
+                  </fieldset>
+                ) : (
+                  <p className="text-slate-600">Projects come from {company.qboProjectMode === "jobs" ? "sub-customers and QuickBooks Projects" : "customers"}. Re-running updates what changed in QuickBooks; anything you&apos;ve coded here is kept.</p>
+                )}
+                <p className="text-xs text-slate-500">
+                  Brings in customers, projects, vendors, employees, products &amp; services (as cost codes), and the last 24 months of bills, expenses, cheques,
+                  vendor credits, time, invoices and credit memos. Overhead expenses not tagged to a customer are skipped. Nothing is written to QuickBooks.
+                </p>
+                <div><button className="btn">{company.qboLastImportAt ? "Sync now" : "Start import"}</button></div>
+              </form>
+            )}
+            {lastRun && (
+              <div className="border-t border-slate-100 pt-3">
+                <p className="mb-2 text-xs text-slate-500">
+                  Last run {new Date(lastRun.startedAt).toLocaleString("en-CA")}: {" "}
+                  <Badge tone={lastRun.status === "OK" ? "green" : lastRun.status === "ERROR" ? "red" : "amber"}>{lastRun.status === "OK" ? "Finished" : lastRun.status === "ERROR" ? "Failed" : "Running"}</Badge>
+                  {lastRun.error && <span className="ml-2 text-red-700">{lastRun.error}</span>}
+                </p>
+                {lastSummary && (
+                  <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3 lg:grid-cols-4">
+                    {SUMMARY_LABELS.map(([k, label]) => <div key={k} className="flex justify-between gap-2"><dt className="text-slate-500">{label}</dt><dd className="num font-medium">{lastSummary[k]}</dd></div>)}
+                  </dl>
+                )}
+                {lastSummary && lastSummary.needsCoding > 0 && <p className="mt-2 text-xs"><a href="/costs" className="text-brand-600 underline">Code {lastSummary.needsCoding} cost lines →</a></p>}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
       {isAdmin && company.sampleDataLoadedAt && (
         <Card title="Sample data" className="mt-5" action={<Badge tone="amber">Loaded {fmtDate(company.sampleDataLoadedAt.slice(0, 10))}</Badge>}>
           <form action={removeSampleData} className="grid gap-3 p-4 text-sm md:grid-cols-[1fr_auto] md:items-end">

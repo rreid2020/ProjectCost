@@ -1,7 +1,9 @@
 import "server-only";
 import { db, schema as s } from "@/db";
-import { and, eq, isNull, asc, desc, inArray, count } from "drizzle-orm";
+import { and, eq, isNull, asc, desc, inArray, count, or } from "drizzle-orm";
 import { labourCost, projectEconomics, healthFlags, type CodeInput, type CostType } from "./engine";
+
+export const UNCODED = "uncoded";
 
 export async function getCostCodes(companyId: string) {
   return db.select().from(s.costCodes).where(eq(s.costCodes.companyId, companyId)).orderBy(asc(s.costCodes.code));
@@ -15,7 +17,7 @@ export async function loadProject(companyId: string, projectId: string) {
   });
   if (!project) return null;
 
-  const [codes, budget, cos, costs, time, fc, sov, bills] = await Promise.all([
+  const [codes, budget, cos, costs, time, fc, sov, bills, qboInvoices] = await Promise.all([
     getCostCodes(companyId),
     db.select().from(s.budgetLines).where(and(eq(s.budgetLines.projectId, projectId), eq(s.budgetLines.companyId, companyId))),
     db.query.changeOrders.findMany({
@@ -40,6 +42,7 @@ export async function loadProject(companyId: string, projectId: string) {
       with: { lines: true },
       orderBy: asc(s.progressBills.number),
     }),
+    db.select().from(s.qboInvoices).where(and(eq(s.qboInvoices.projectId, projectId), eq(s.qboInvoices.companyId, companyId))).orderBy(desc(s.qboInvoices.date)),
   ]);
 
   const approvedCos = cos.filter((c) => c.status === "APPROVED");
@@ -47,7 +50,7 @@ export async function loadProject(companyId: string, projectId: string) {
   const ensure = (costCodeId: string) => {
     let row = byCode.get(costCodeId);
     if (!row) {
-      const cc = codes.find((c) => c.id === costCodeId)!;
+      const cc = codes.find((c) => c.id === costCodeId) ?? { code: "—", name: "Needs a cost code", costType: "OTHER" };
       row = { costCodeId, code: cc.code, name: cc.name, costType: cc.costType as CostType, originalBudget: 0, approvedChanges: 0, actual: 0, etcOverride: null };
       byCode.set(costCodeId, row);
     }
@@ -55,7 +58,8 @@ export async function loadProject(companyId: string, projectId: string) {
   };
   for (const b of budget) ensure(b.costCodeId).originalBudget += b.originalCents;
   for (const co of approvedCos) for (const l of co.lines) ensure(l.costCodeId).approvedChanges += l.costCents;
-  for (const c of costs) if (c.costCodeId) ensure(c.costCodeId).actual += c.amountCents;
+  // costs on this project that still need a cost code count toward cost to date under a placeholder row
+  for (const c of costs) ensure(c.costCodeId ?? UNCODED).actual += c.amountCents;
 
   let wages = 0, burden = 0, approvedHours = 0, pendingHours = 0, billableTm = 0;
   for (const t of time) {
@@ -68,7 +72,8 @@ export async function loadProject(companyId: string, projectId: string) {
   for (const f of fc) ensure(f.costCodeId).etcOverride = f.etcCents;
 
   const postedBills = bills.filter((b) => b.status === "POSTED");
-  const billedToDate = postedBills.flatMap((b) => b.lines).reduce((a, l) => a + l.thisPeriodCents, 0);
+  const billedInQbo = qboInvoices.reduce((a, i) => a + i.amountCents, 0); // invoices raised in QuickBooks, pre-tax
+  const billedToDate = postedBills.flatMap((b) => b.lines).reduce((a, l) => a + l.thisPeriodCents, 0) + billedInQbo;
 
   const econ = projectEconomics({
     originalContract: project.originalContractCents,
@@ -79,7 +84,8 @@ export async function loadProject(companyId: string, projectId: string) {
   });
 
   return {
-    project, codes, changeOrders: cos, costs, time, sov, bills, econ,
+    project, codes, changeOrders: cos, costs, time, sov, bills, qboInvoices, billedInQbo, econ,
+    budgetLines: budget,
     flags: healthFlags(econ),
     labour: { wages, burden, approvedHours, pendingHours, billableTm },
     pendingCoRevenue: cos.filter((c) => c.status === "PENDING").reduce((a, c) => a + c.contractAmountCents, 0),
@@ -98,8 +104,9 @@ export async function loadPortfolio(companyId: string, statuses: string[] = ["AC
 
 export async function unassignedCosts(companyId: string) {
   return db.query.costTransactions.findMany({
-    where: and(eq(s.costTransactions.companyId, companyId), isNull(s.costTransactions.projectId)),
-    with: { vendor: true },
+    // needs coding: no project, or a project but no cost code
+    where: and(eq(s.costTransactions.companyId, companyId), or(isNull(s.costTransactions.projectId), isNull(s.costTransactions.costCodeId))),
+    with: { vendor: true, project: true },
     orderBy: desc(s.costTransactions.date),
   });
 }
@@ -114,6 +121,7 @@ export async function pendingTimeCount(companyId: string) {
 }
 
 export async function unassignedCount(companyId: string) {
-  const [r] = await db.select({ n: count() }).from(s.costTransactions).where(and(eq(s.costTransactions.companyId, companyId), isNull(s.costTransactions.projectId)));
+  const [r] = await db.select({ n: count() }).from(s.costTransactions)
+    .where(and(eq(s.costTransactions.companyId, companyId), or(isNull(s.costTransactions.projectId), isNull(s.costTransactions.costCodeId))));
   return r.n;
 }

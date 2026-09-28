@@ -190,3 +190,71 @@ export async function removeSampleData(form: FormData) {
   revalidatePath("/", "layout");
   redirect("/dashboard");
 }
+
+// ---------- Budget ----------
+/** Sets a project's original budget for one cost code; blank or 0 removes the line. */
+export async function saveBudgetLine(form: FormData) {
+  const t = await requireWrite();
+  const project = await ownProject(t.company.id, str(form, "projectId"));
+  const costCodeId = str(form, "costCodeId"), raw = str(form, "amount");
+  if (!costCodeId) return;
+  const amount = toCents(raw);
+  if (!amount) {
+    await db.delete(s.budgetLines).where(and(eq(s.budgetLines.companyId, t.company.id), eq(s.budgetLines.projectId, project.id), eq(s.budgetLines.costCodeId, costCodeId)));
+  } else {
+    await db.insert(s.budgetLines).values({ companyId: t.company.id, projectId: project.id, costCodeId, originalCents: amount })
+      .onConflictDoUpdate({ target: [s.budgetLines.projectId, s.budgetLines.costCodeId], set: { originalCents: amount } });
+  }
+  revalidatePath(`/projects/${project.id}`);
+}
+
+// ---------- Project setup ----------
+const PROJECT_STATUSES = ["BID", "ACTIVE", "COMPLETE"], CONTRACT_TYPES = ["FIXED", "TM", "COST_PLUS"];
+const isoDate = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+const pctBp = (v: string, fallback: number) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 100) : fallback; };
+
+export async function updateProject(form: FormData) {
+  const t = await requireWrite();
+  const p = await ownProject(t.company.id, str(form, "projectId"));
+  const number = str(form, "number").slice(0, 40) || p.number;
+  const clash = await db.query.projects.findFirst({ where: and(eq(s.projects.companyId, t.company.id), eq(s.projects.number, number)) });
+  if (clash && clash.id !== p.id) throw new Error(`Project number ${number} is already used.`);
+  await db.update(s.projects).set({
+    number,
+    name: str(form, "name").slice(0, 200) || p.name,
+    status: PROJECT_STATUSES.includes(str(form, "status")) ? str(form, "status") : p.status,
+    contractType: CONTRACT_TYPES.includes(str(form, "contractType")) ? str(form, "contractType") : p.contractType,
+    originalContractCents: toCents(str(form, "contract")),
+    holdbackBp: pctBp(str(form, "holdbackPct"), p.holdbackBp),
+    taxBp: pctBp(str(form, "taxPct"), p.taxBp),
+    projectManager: str(form, "projectManager").slice(0, 120) || null,
+    startDate: isoDate(str(form, "startDate")),
+    endDate: isoDate(str(form, "endDate")),
+  }).where(and(eq(s.projects.id, p.id), eq(s.projects.companyId, t.company.id)));
+  revalidatePath("/", "layout");
+  redirect(`/projects/${p.id}?tab=setup&saved=1`);
+}
+
+// ---------- Employees ----------
+/** Sets pay/burden/bill rates. Time entries that were imported without a pay rate pick up the new rate. */
+export async function updateEmployee(form: FormData) {
+  const t = await requireAdmin();
+  const emp = await db.query.employees.findFirst({ where: and(eq(s.employees.id, str(form, "id")), eq(s.employees.companyId, t.company.id)) });
+  if (!emp) return;
+  const payRateCents = toCents(str(form, "payRate")), billRateCents = toCents(str(form, "billRate")), burdenBp = pctBp(str(form, "burdenPct"), emp.burdenBp);
+  await db.update(s.employees).set({ payRateCents, billRateCents, burdenBp, trade: str(form, "trade").slice(0, 80) || emp.trade })
+    .where(and(eq(s.employees.id, emp.id), eq(s.employees.companyId, t.company.id)));
+  if (payRateCents > 0)
+    await db.update(s.timeEntries).set({ payRateCents, burdenBp })
+      .where(and(eq(s.timeEntries.companyId, t.company.id), eq(s.timeEntries.employeeId, emp.id), eq(s.timeEntries.payRateCents, 0)));
+  revalidatePath("/", "layout");
+}
+
+// ---------- Cost code edits ----------
+export async function updateCostCode(form: FormData) {
+  const t = await requireAdmin();
+  const costType = str(form, "costType");
+  if (!["LABOUR", "MATERIAL", "SUB", "EQUIPMENT", "OTHER"].includes(costType)) return;
+  await db.update(s.costCodes).set({ costType }).where(and(eq(s.costCodes.id, str(form, "id")), eq(s.costCodes.companyId, t.company.id)));
+  revalidatePath("/", "layout");
+}

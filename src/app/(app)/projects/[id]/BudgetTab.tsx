@@ -1,7 +1,7 @@
 import { Card, M, Progress, Badge } from "@/components/ui";
 import { money } from "@/lib/format";
-import type { LoadedProject } from "@/lib/queries";
-import { saveForecast } from "@/app/actions";
+import { UNCODED, type LoadedProject } from "@/lib/queries";
+import { saveBudgetLine, saveForecast } from "@/app/actions";
 
 const typeLabel: Record<string, string> = { LABOUR: "Labour", MATERIAL: "Material", SUB: "Subcontract", EQUIPMENT: "Equipment", OTHER: "Other" };
 
@@ -16,6 +16,11 @@ export function BudgetTab({ data }: { data: LoadedProject }) {
   );
   return (
     <div className="grid gap-5">
+      {e.originalBudget === 0 && (
+        <p className="rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          This project has no budget yet, so % complete and earned revenue aren&apos;t meaningful. Enter the original budget by cost code below, and the contract value under Setup.
+        </p>
+      )}
       <Card title="Budget vs. actual by cost code" action={<span className="text-xs text-slate-500">Edit “Est. to complete” to override remaining budget · blank = remaining budget</span>}>
         <div className="overflow-x-auto">
           <table className="grid-table">
@@ -27,26 +32,52 @@ export function BudgetTab({ data }: { data: LoadedProject }) {
               {e.rows.map((r) => (
                 <tr key={r.costCodeId}>
                   <td className="whitespace-nowrap"><span className="font-mono text-xs text-slate-500">{r.code}</span> <span className="text-slate-800">{r.name}</span></td>
-                  <td className="num"><M v={r.originalBudget} /></td>
+                  <td className="num">
+                    {r.costCodeId === UNCODED ? <M v={r.originalBudget} /> : (
+                      <form action={saveBudgetLine} className="flex items-center justify-end gap-1">
+                        <input type="hidden" name="projectId" value={p.id} />
+                        <input type="hidden" name="costCodeId" value={r.costCodeId} />
+                        <input name="amount" defaultValue={r.originalBudget ? Math.round(r.originalBudget / 100).toLocaleString("en-CA") : ""} placeholder="0"
+                          className="input w-24 text-right" aria-label={`Original budget for ${r.code}`} />
+                        <button className="btn btn-secondary btn-sm" title="Save budget">✓</button>
+                      </form>
+                    )}
+                  </td>
                   <td className="num">{r.approvedChanges ? <M v={r.approvedChanges} /> : "—"}</td>
                   <td className="num"><M v={r.revisedBudget} /></td>
                   <td className="num"><M v={r.actual} /></td>
                   <td><Progress valueBp={r.pctSpentBp} /></td>
                   <td className="num">
+                    {r.costCodeId === UNCODED ? <a href="/costs" className="text-xs text-amber-700 underline">Code these costs</a> :
                     <form action={saveForecast} className="flex items-center justify-end gap-1">
                       <input type="hidden" name="projectId" value={p.id} />
                       <input type="hidden" name="costCodeId" value={r.costCodeId} />
                       <input name="etc" defaultValue={r.etcOverride != null ? Math.round(r.etcOverride / 100).toLocaleString("en-CA") : ""} placeholder={Math.round(r.etc / 100).toLocaleString("en-CA")}
                         className={`input w-24 text-right ${r.etcOverride != null ? "border-sky-300 bg-sky-50" : ""}`} aria-label={`Estimate to complete for ${r.code}`} />
                       <button className="btn btn-secondary btn-sm" title="Save forecast">✓</button>
-                    </form>
+                    </form>}
                   </td>
                   <td className="num"><M v={r.eac} /></td>
                   <td className="num">{r.variance < 0 ? <Badge tone="red">{money(r.variance)}</Badge> : <M v={r.variance} />}</td>
                 </tr>
               ))}
             </tbody>
-            <tfoot><tr>
+            <tfoot>
+            <tr>
+              <td colSpan={9} className="!font-normal">
+                <form action={saveBudgetLine} className="flex flex-wrap items-center gap-2">
+                  <input type="hidden" name="projectId" value={p.id} />
+                  <span className="text-xs text-slate-500">Add to budget</span>
+                  <select name="costCodeId" required className="input w-64" defaultValue="">
+                    <option value="" disabled>Cost code…</option>
+                    {data.codes.filter((c) => c.active && !e.rows.some((r) => r.costCodeId === c.id)).map((c) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}
+                  </select>
+                  <input name="amount" required inputMode="decimal" placeholder="Amount" className="input w-28 text-right" />
+                  <button className="btn btn-sm">Add</button>
+                </form>
+              </td>
+            </tr>
+            <tr>
               <td>Total</td>
               <td className="num"><M v={e.originalBudget} /></td>
               <td className="num"><M v={e.revisedBudget - e.originalBudget} /></td>
@@ -56,7 +87,8 @@ export function BudgetTab({ data }: { data: LoadedProject }) {
               <td className="num"><M v={e.etc} /></td>
               <td className="num"><M v={e.eac} /></td>
               <td className="num"><M v={e.revisedBudget - e.eac} signTone="variance" /></td>
-            </tr></tfoot>
+            </tr>
+            </tfoot>
           </table>
         </div>
       </Card>

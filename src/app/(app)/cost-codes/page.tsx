@@ -1,7 +1,7 @@
 import { getCostCodes } from "@/lib/queries";
 import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, Badge } from "@/components/ui";
-import { addCostCode } from "@/app/actions";
+import { addCostCode, updateCostCode } from "@/app/actions";
 
 export default async function CostCodes() {
   const { company, isAdmin } = await getTenant();
@@ -14,7 +14,13 @@ export default async function CostCodes() {
           <table className="grid-table">
             <thead><tr><th>Code</th><th>Name</th><th>Cost type</th><th>QBO mapping</th></tr></thead>
             <tbody>{codes.map((c) => (
-              <tr key={c.id}><td className="font-mono">{c.code}</td><td>{c.name}</td><td className="text-xs text-slate-600">{c.costType}</td><td>{c.qboItemId ? <Badge tone="green">Item {c.qboItemId}</Badge> : <Badge>Not mapped</Badge>}</td></tr>
+              <tr key={c.id}><td className="font-mono">{c.code}</td><td>{c.name}</td><td className="text-xs text-slate-600">{isAdmin ? (
+                <form action={updateCostCode} className="flex items-center gap-1">
+                  <input type="hidden" name="id" value={c.id} />
+                  <select name="costType" defaultValue={c.costType} className="input py-0.5 text-xs" aria-label={`Cost type for ${c.code}`}>{["LABOUR", "MATERIAL", "SUB", "EQUIPMENT", "OTHER"].map((t) => <option key={t}>{t}</option>)}</select>
+                  <button className="btn btn-secondary btn-sm">✓</button>
+                </form>
+              ) : c.costType}</td><td>{c.qboItemId ? <Badge tone="green">Item {c.qboItemId}</Badge> : <Badge>Not mapped</Badge>}{!c.active && <> <Badge>Inactive</Badge></>}</td></tr>
             ))}</tbody>
           </table>
         </Card>

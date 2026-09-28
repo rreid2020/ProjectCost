@@ -224,6 +224,10 @@ export const costTransactions = pgTable(
     qboTxnId: text("qbo_txn_id"),
     qboLineId: text("qbo_line_id"),
     qboCustomerName: text("qbo_customer_name"), // the QBO customer/job the line was tagged to, shown when it needs coding
+    // for tracing back to QuickBooks: the line as QuickBooks shows it (transaction currency) and the rate used
+    qboCurrency: text("qbo_currency"),
+    qboLineAmountCents: cents("qbo_line_amount_cents"),
+    qboExchangeRate: text("qbo_exchange_rate"),
     assignedAt: text("assigned_at"),
     pendingPush: boolean("pending_push").notNull().default(false),
   },
@@ -354,7 +358,12 @@ export const qboInvoices = pgTable(
     qboTxnId: text("qbo_txn_id").notNull(),
     docNumber: text("doc_number"),
     date: text("date").notNull(),
-    amountCents: cents("amount_cents").notNull(), // pre-tax; negative for credit memos
+    amountCents: cents("amount_cents").notNull(), // pre-tax, home currency; negative for credit memos
+    // as QuickBooks shows it (transaction currency), for tracing
+    totalCents: cents("total_cents"),
+    taxCents: cents("tax_cents"),
+    currency: text("currency"),
+    exchangeRate: text("exchange_rate"),
   },
   (t) => [uniqueIndex("qbo_invoice_company_txn").on(t.companyId, t.qboTxnType, t.qboTxnId), toProject("qbo_invoice", t.companyId, t.projectId)],
 );

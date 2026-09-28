@@ -29,6 +29,13 @@
       "when": 1790603215978,
       "tag": "0003_qbo_import",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790622106192,
+      "tag": "0004_trace_fields",
+      "breakpoints": true
     }
   ]
 }

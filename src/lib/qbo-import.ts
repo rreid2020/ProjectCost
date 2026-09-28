@@ -242,6 +242,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
         taxCents: recoverable ? sign * Math.round(cents(tax) * rate) : 0,
         vendorId: vendorRef ? vendorIdByQbo.get(String(vendorRef)) ?? null : null,
         projectId, costCodeId, qboCustomerName: detail.CustomerRef?.name ? String(detail.CustomerRef.name) : null,
+        qboCurrency: txn.CurrencyRef?.value ? String(txn.CurrencyRef.value) : null, qboLineAmountCents: sign * cents(net), qboExchangeRate: String(rate),
         assignedAt: projectId && costCodeId ? String(txn.TxnDate) : null,
       });
       if (!projectId || !costCodeId) summary.needsCoding++;
@@ -253,6 +254,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
         set: {
           date: sql`excluded.date`, source: sql`excluded.source`, docNumber: sql`excluded.doc_number`, description: sql`excluded.description`,
           amountCents: sql`excluded.amount_cents`, taxCents: sql`excluded.tax_cents`, vendorId: sql`excluded.vendor_id`, qboCustomerName: sql`excluded.qbo_customer_name`,
+          qboCurrency: sql`excluded.qbo_currency`, qboLineAmountCents: sql`excluded.qbo_line_amount_cents`, qboExchangeRate: sql`excluded.qbo_exchange_rate`,
           // QuickBooks wins when it has a value; otherwise keep what was coded in ProjectCost
           projectId: sql`coalesce(excluded.project_id, ${ct.projectId})`,
           costCodeId: sql`coalesce(excluded.cost_code_id, ${ct.costCodeId})`,
@@ -301,14 +303,22 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
       const projectId = inv.CustomerRef?.value ? projectIdByQbo.get(String(inv.CustomerRef.value)) : undefined;
       if (!projectId || (type === "Invoice" && ownInvoices.has(String(inv.Id)))) continue;
       seenInv.add(`${type}|${inv.Id}`);
-      const pre = cents(Number(inv.TotalAmt ?? 0) - Number(inv.TxnTaxDetail?.TotalTax ?? 0)) * Number(inv.ExchangeRate ?? 1);
-      invValues.push({ companyId: c, projectId, qboTxnType: type, qboTxnId: String(inv.Id), docNumber: inv.DocNumber ? String(inv.DocNumber) : null, date: String(inv.TxnDate), amountCents: Math.round(type === "CreditMemo" ? -pre : pre) });
+      const rate = Number(inv.ExchangeRate ?? 1), sign = type === "CreditMemo" ? -1 : 1;
+      const total = cents(inv.TotalAmt), tax = cents(inv.TxnTaxDetail?.TotalTax);
+      invValues.push({
+        companyId: c, projectId, qboTxnType: type, qboTxnId: String(inv.Id), docNumber: inv.DocNumber ? String(inv.DocNumber) : null, date: String(inv.TxnDate),
+        amountCents: sign * Math.round((total - tax) * rate), totalCents: sign * total, taxCents: sign * tax,
+        currency: inv.CurrencyRef?.value ? String(inv.CurrencyRef.value) : null, exchangeRate: String(rate),
+      });
     }
     const qi = s.qboInvoices;
     for (const part of chunk(invValues)) if (part.length)
       await tx.insert(qi).values(part).onConflictDoUpdate({
         target: [qi.companyId, qi.qboTxnType, qi.qboTxnId],
-        set: { projectId: sql`excluded.project_id`, docNumber: sql`excluded.doc_number`, date: sql`excluded.date`, amountCents: sql`excluded.amount_cents` },
+        set: {
+          projectId: sql`excluded.project_id`, docNumber: sql`excluded.doc_number`, date: sql`excluded.date`, amountCents: sql`excluded.amount_cents`,
+          totalCents: sql`excluded.total_cents`, taxCents: sql`excluded.tax_cents`, currency: sql`excluded.currency`, exchangeRate: sql`excluded.exchange_rate`,
+        },
       });
     summary.invoices = invValues.length;
 

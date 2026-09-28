@@ -5,9 +5,12 @@ import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, M, Empty, Badge } from "@/components/ui";
 import { fmtDate } from "@/lib/format";
 import { assignCost } from "@/app/actions";
+import { QboRef } from "@/app/(app)/projects/[id]/LedgerTabs";
+import { qboEnvironment } from "@/lib/qbo";
 
 export default async function Costs() {
   const { company } = await getTenant();
+  const qbo = { environment: qboEnvironment(), realmId: company.qboRealmId };
   const [items, codes, projects, recent] = await Promise.all([
     unassignedCosts(company.id),
     getCostCodes(company.id),
@@ -20,12 +23,12 @@ export default async function Costs() {
       <Card title={`${items.length} waiting`}>
         {items.length === 0 ? <Empty>Everything is coded. Nice.</Empty> : (
           <table className="grid-table">
-            <thead><tr><th>Date</th><th>Vendor</th><th>Doc #</th><th>Description</th><th>QuickBooks customer</th><th className="num">Amount</th><th>Assign to</th></tr></thead>
+            <thead><tr><th>Date</th><th>Vendor</th><th>QuickBooks transaction</th><th>Description</th><th>QuickBooks customer</th><th className="num">Amount</th><th>Assign to</th></tr></thead>
             <tbody>{items.map((c) => (
               <tr key={c.id}>
                 <td className="whitespace-nowrap text-xs">{fmtDate(c.date)}</td>
                 <td>{c.vendor?.name}</td>
-                <td className="whitespace-nowrap font-mono text-xs">{c.docNumber}</td>
+                <td><QboRef ctx={qbo} type={c.qboTxnType} id={c.qboTxnId} source={c.source} doc={c.docNumber} line={c.qboLineId} /></td>
                 <td className="text-slate-600">{c.description}</td>
                 <td className="text-xs text-slate-500">{c.qboCustomerName ?? "—"}</td>
                 <td className="num"><M v={c.amountCents} cents /></td>

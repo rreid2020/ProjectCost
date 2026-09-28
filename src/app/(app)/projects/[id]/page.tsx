@@ -9,6 +9,7 @@ import { ChangeOrdersTab } from "./ChangeOrdersTab";
 import { BillingTab } from "./BillingTab";
 import { CostsTab, TimeTab } from "./LedgerTabs";
 import { SetupTab } from "./SetupTab";
+import { qboEnvironment } from "@/lib/qbo";
 
 const TABS = [
   ["budget", "Budget vs. actual"],
@@ -19,11 +20,12 @@ const TABS = [
   ["setup", "Setup"],
 ] as const;
 
-export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; saved?: string }> }) {
+export default async function ProjectPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; saved?: string; code?: string }> }) {
   const { id } = await params;
-  const { tab = "budget", saved } = await searchParams;
+  const { tab = "budget", saved, code } = await searchParams;
   const { company } = await getTenant();
   const data = await loadProject(company.id, id);
+  const qbo = { environment: qboEnvironment(), realmId: company.qboRealmId };
   if (!data) notFound();
   const { project: p, econ: e, flags } = data;
 
@@ -58,9 +60,9 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
       <div className="mt-4">
         {tab === "budget" && <BudgetTab data={data} />}
         {tab === "changes" && <ChangeOrdersTab data={data} />}
-        {tab === "billing" && <BillingTab data={data} />}
-        {tab === "costs" && <CostsTab data={data} />}
-        {tab === "time" && <TimeTab data={data} />}
+        {tab === "billing" && <BillingTab data={data} ctx={qbo} />}
+        {tab === "costs" && <CostsTab data={data} ctx={qbo} code={code} region={company.region} />}
+        {tab === "time" && <TimeTab data={data} code={code} />}
         {tab === "setup" && <SetupTab data={data} saved={saved === "1"} />}
       </div>
     </div>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Card, M, Progress, Badge } from "@/components/ui";
 import { money } from "@/lib/format";
 import { UNCODED, type LoadedProject } from "@/lib/queries";
@@ -45,7 +46,7 @@ export function BudgetTab({ data }: { data: LoadedProject }) {
                   </td>
                   <td className="num">{r.approvedChanges ? <M v={r.approvedChanges} /> : "—"}</td>
                   <td className="num"><M v={r.revisedBudget} /></td>
-                  <td className="num"><M v={r.actual} /></td>
+                  <td className="num"><Link href={`?tab=costs&code=${r.costCodeId}`} className="text-brand-700 hover:underline" title="See the transactions behind this amount"><M v={r.actual} /></Link></td>
                   <td><Progress valueBp={r.pctSpentBp} /></td>
                   <td className="num">
                     {r.costCodeId === UNCODED ? <a href="/costs" className="text-xs text-amber-700 underline">Code these costs</a> :
@@ -82,7 +83,7 @@ export function BudgetTab({ data }: { data: LoadedProject }) {
               <td className="num"><M v={e.originalBudget} /></td>
               <td className="num"><M v={e.revisedBudget - e.originalBudget} /></td>
               <td className="num"><M v={e.revisedBudget} /></td>
-              <td className="num"><M v={e.costToDate} /></td>
+              <td className="num"><Link href="?tab=costs" className="text-brand-700 hover:underline"><M v={e.costToDate} /></Link></td>
               <td></td>
               <td className="num"><M v={e.etc} /></td>
               <td className="num"><M v={e.eac} /></td>

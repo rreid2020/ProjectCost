@@ -40,6 +40,9 @@ function fixtures() {
           { Id: "1", Amount: 262.5, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: item("13", "Misc", retreat) },
           { Id: "2", Amount: 187.5, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: item("13", "Misc", ["10", "Lew Plumbing"]) },
         ] },
+      // foreign currency, like the sandbox's HKD bills
+      { Id: "20", TxnDate: "2026-08-05", VendorRef: { value: "35" }, CurrencyRef: { value: "HKD" }, ExchangeRate: 0.137365,
+        Line: [{ Id: "1", Amount: 3715.26, DetailType: "ItemBasedExpenseLineDetail", ItemBasedExpenseLineDetail: item("21", "Name Badges", retreat) }] },
       // COGS with no customer: job cost that needs coding
       { Id: "96", TxnDate: "2026-08-06", VendorRef: { value: "35" },
         Line: [{ Id: "1", Amount: 50, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: "44", name: "Cost of sales" } } }] },
@@ -128,7 +131,7 @@ describe("jobs mode, Canadian company", () => {
   it("imports job-cost lines, skips overhead, allocates recoverable tax, and signs refunds", async () => {
     const costs = await rows.costs(c);
     expect(summary.overheadSkipped).toBe(1);
-    expect(costs).toHaveLength(5);
+    expect(costs).toHaveLength(6);
     const key = (t: string, id: string, line = "1") => costs.find((x) => x.qboTxnType === t && x.qboTxnId === id && x.qboLineId === line)!;
     const retreat = (await rows.projects(c)).find((p) => p.qboProjectId === "66")!;
     expect(key("Bill", "97")).toMatchObject({ projectId: retreat.id, amountCents: 262_50, taxCents: 26_25, source: "BILL", docNumber: "B-97" });
@@ -137,6 +140,13 @@ describe("jobs mode, Canadian company", () => {
     expect(key("Purchase", "44")).toMatchObject({ source: "CHECK", amountCents: 1000_00 });
     expect(key("Purchase", "45")).toMatchObject({ source: "EXPENSE", amountCents: -100_00 });
     expect(summary.needsCoding).toBe(2);
+  });
+
+  it("keeps what QuickBooks shows, for tracing: original currency amount, rate, invoice total and tax", async () => {
+    const hkd = (await rows.costs(c)).find((x) => x.qboTxnId === "20")!;
+    expect(hkd).toMatchObject({ qboCurrency: "HKD", qboLineAmountCents: 3715_26, qboExchangeRate: "0.137365", amountCents: 510_35 });
+    const inv = await db.query.qboInvoices.findFirst({ where: and(eq(s.qboInvoices.companyId, c), eq(s.qboInvoices.qboTxnId, "126")) });
+    expect(inv).toMatchObject({ totalCents: 11_300_00, taxCents: 1_300_00, amountCents: 10_000_00 });
   });
 
   it("imports employee time on projects as approved, at the employee's rate", async () => {
@@ -169,7 +179,7 @@ describe("jobs mode, Canadian company", () => {
     expect(await rows.codes(c)).toHaveLength(3);
     expect(await rows.time(c)).toHaveLength(1);
     const costs = await rows.costs(c);
-    expect(costs).toHaveLength(4);
+    expect(costs).toHaveLength(5);
     expect(second.removed).toBe(1);
     expect(costs.find((x) => x.id === lew.id)).toMatchObject({ projectId: retreat.id, costCodeId: misc.id, pendingPush: true });
     expect(await db.query.projects.findFirst({ where: eq(s.projects.id, retreat.id) })).toMatchObject({ name: "Renamed in ProjectCost", originalContractCents: 1 });

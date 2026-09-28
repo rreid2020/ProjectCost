@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db, schema as s } from "@/db";
 import { desc, eq } from "drizzle-orm";
 import { loadPortfolio } from "@/lib/queries";
@@ -55,10 +56,10 @@ export default async function Wip() {
                 <td className="num"><M v={e.revisedContract} /></td>
                 <td className="num"><M v={e.eac} /></td>
                 <td className="num"><M v={e.projectedProfit} signTone="profit" /></td>
-                <td className="num"><M v={e.costToDate} /></td>
+                <td className="num"><Link href={`/projects/${p.id}?tab=costs`} className="hover:underline"><M v={e.costToDate} /></Link></td>
                 <td className="num">{pct(e.pctCompleteBp)}</td>
                 <td className="num"><M v={e.earnedRevenue} /></td>
-                <td className="num"><M v={e.billedToDate} /></td>
+                <td className="num"><Link href={`/projects/${p.id}?tab=billing`} className="hover:underline"><M v={e.billedToDate} /></Link></td>
                 <td className="num">{e.overUnder < 0 ? <M v={-e.overUnder} /> : "—"}</td>
                 <td className="num">{e.overUnder > 0 ? <M v={e.overUnder} /> : "—"}</td>
                 <td className="num">{e.lossProvision ? <span className="text-red-700">{money(e.lossProvision)}</span> : "—"}</td>

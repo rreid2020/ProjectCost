@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { loadPortfolio } from "@/lib/queries";
 import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, StatusBadge, Progress, M, ProjectCell } from "@/components/ui";
@@ -22,11 +23,11 @@ export default async function Projects() {
                   <td className="text-xs text-slate-500 whitespace-nowrap">{fmtDate(p.startDate)} – {fmtDate(p.endDate)}</td>
                   <td><Progress valueBp={e.pctCompleteBp} /></td>
                   <td className="num"><M v={e.revisedContract} /></td>
-                  <td className="num"><M v={e.costToDate} /></td>
+                  <td className="num"><Link href={`/projects/${p.id}?tab=costs`} className="hover:underline"><M v={e.costToDate} /></Link></td>
                   <td className="num"><M v={e.eac} /></td>
                   <td className="num"><M v={e.projectedProfit} signTone="profit" /></td>
                   <td className="num">{pct(e.projectedMarginBp)}</td>
-                  <td className="num"><M v={e.billedToDate} /></td>
+                  <td className="num"><Link href={`/projects/${p.id}?tab=billing`} className="hover:underline"><M v={e.billedToDate} /></Link></td>
                 </tr>
               ))}
             </tbody>

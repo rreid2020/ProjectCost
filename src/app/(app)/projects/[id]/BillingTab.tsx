@@ -4,8 +4,10 @@ import { progressBill } from "@/lib/engine";
 import type { LoadedProject } from "@/lib/queries";
 import { postProgressBill, deleteProgressBill } from "@/app/actions";
 import { NewBillForm } from "./NewBillForm";
+import { QboRef } from "./LedgerTabs";
+import type { QboLinkContext } from "@/lib/qbo-links";
 
-export function BillingTab({ data }: { data: LoadedProject }) {
+export function BillingTab({ data, ctx }: { data: LoadedProject; ctx: QboLinkContext }) {
   const { sov, bills, project: p } = data;
   const posted = bills.filter((b) => b.status === "POSTED");
   const prevByLine = new Map<string, number>();
@@ -18,8 +20,13 @@ export function BillingTab({ data }: { data: LoadedProject }) {
   const today = new Date();
   const eom = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
 
+  const billedHere = data.econ.billedToDate - data.billedInQbo;
   return (
     <div className="grid gap-5">
+      <p className="rounded-md border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700">
+        Billed to date <span className="font-semibold">{money(data.econ.billedToDate, { cents: true })}</span> = progress bills posted in ProjectCost {money(billedHere, { cents: true })}
+        {" "}+ invoices and credit memos in QuickBooks {money(data.billedInQbo, { cents: true })} (pre-tax)
+      </p>
       {sov.length === 0 ? (
         <Card title="Progress billing">
           <p className="px-4 py-3 text-sm text-slate-600">This project has no schedule of values yet, so progress bills can&apos;t be drafted here.{data.qboInvoices.length ? " Invoices raised in QuickBooks are listed below and count toward billed to date." : ""}</p>
@@ -40,11 +47,17 @@ export function BillingTab({ data }: { data: LoadedProject }) {
       {data.qboInvoices.length > 0 && (
         <Card title="Invoiced in QuickBooks" action={<span className="text-xs text-slate-500">Pre-tax · counts toward billed to date · {money(data.billedInQbo)}</span>}>
           <table className="grid-table">
-            <thead><tr><th>Date</th><th>Type</th><th>Number</th><th className="num">Amount (pre-tax)</th></tr></thead>
+            <thead><tr><th>Date</th><th>QuickBooks transaction</th><th className="num">Total in QuickBooks</th><th className="num">Less tax</th><th className="num">Billed (pre-tax)</th></tr></thead>
             <tbody>{data.qboInvoices.map((i) => (
-              <tr key={i.id}><td className="text-xs">{fmtDate(i.date)}</td><td className="text-xs">{i.qboTxnType === "CreditMemo" ? "Credit memo" : "Invoice"}</td>
-                <td className="font-mono text-xs">{i.docNumber ?? i.qboTxnId}</td><td className="num"><M v={i.amountCents} cents /></td></tr>
+              <tr key={i.id}>
+                <td className="text-xs">{fmtDate(i.date)}</td>
+                <td><QboRef ctx={ctx} type={i.qboTxnType} id={i.qboTxnId} doc={i.docNumber} /></td>
+                <td className="num">{i.totalCents != null ? <>{i.currency && i.exchangeRate !== "1" ? `${i.currency} ` : ""}<M v={i.totalCents} cents /></> : "—"}</td>
+                <td className="num text-slate-500">{i.taxCents != null ? <M v={-i.taxCents} cents /> : "—"}</td>
+                <td className="num font-medium"><M v={i.amountCents} cents />{i.exchangeRate && i.exchangeRate !== "1" && <span className="block text-[0.68rem] text-slate-400">× {i.exchangeRate}</span>}</td>
+              </tr>
             ))}</tbody>
+            <tfoot><tr><td colSpan={4}>Billed in QuickBooks</td><td className="num"><M v={data.billedInQbo} cents /></td></tr></tfoot>
           </table>
         </Card>
       )}

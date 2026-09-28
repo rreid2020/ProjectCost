@@ -7,7 +7,7 @@
 // (company_id, <parent>_id) -> parent(company_id, id). The database therefore rejects any row that
 // points at another company's project, cost code, employee, etc., even if app code is wrong.
 import { pgTable, text, integer, bigint, boolean, uniqueIndex, unique, foreignKey, index, type AnyPgColumn } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const cents = (name: string) => bigint(name, { mode: "number" }); // bigint: contracts can exceed int4's $21.4M in cents
@@ -23,6 +23,7 @@ export const companies = pgTable("company", {
   closedThrough: text("closed_through"), // never write to QBO on/before this date
   qboRealmId: text("qbo_realm_id"),
   qboConnectedAt: text("qbo_connected_at"),
+  qboCompanyName: text("qbo_company_name"), // CompanyInfo.CompanyName at connect time
   defaultHoldbackBp: integer("default_holdback_bp").notNull().default(1000),
   defaultTaxBp: integer("default_tax_bp").notNull().default(1300),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -35,6 +36,24 @@ export const companies = pgTable("company", {
   subscriptionStatus: text("subscription_status"), // Stripe status: trialing | active | past_due | canceled | unpaid ...
   currentPeriodEnd: text("current_period_end"),
   cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+}, (t) => [
+  // One QuickBooks file can feed only one live company, so two workspaces never sync the same books.
+  uniqueIndex("company_qbo_realm_live").on(t.qboRealmId).where(sql`${t.deletedAt} is null`),
+]);
+
+// QuickBooks Online OAuth tokens, one row per connected company. Tokens are AES-256-GCM encrypted
+// with QBO_TOKEN_KEY (src/lib/crypto.ts); only src/lib/qbo.ts reads them.
+export const qboConnections = pgTable("qbo_connection", {
+  companyId: text("company_id").primaryKey().references(() => companies.id, { onDelete: "cascade" }),
+  realmId: text("realm_id").notNull(),
+  environment: text("environment").notNull(), // sandbox | production
+  accessTokenEnc: text("access_token_enc").notNull(),
+  accessTokenExpiresAt: text("access_token_expires_at").notNull(),
+  refreshTokenEnc: text("refresh_token_enc").notNull(),
+  refreshTokenExpiresAt: text("refresh_token_expires_at").notNull(),
+  connectedByUserId: text("connected_by_user_id").notNull(),
+  connectedAt: text("connected_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 export const costCodes = pgTable(

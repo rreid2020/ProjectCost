@@ -1,17 +1,11 @@
 "use server";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db, schema as s } from "@/db";
 import { requireAdmin } from "@/lib/tenant";
 import { isPlanKey, priceIdFor } from "@/lib/plans";
 import { stripe } from "@/lib/stripe";
-
-async function appOrigin() {
-  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
-  const h = await headers();
-  return `${h.get("x-forwarded-proto") ?? "http"}://${h.get("x-forwarded-host") ?? h.get("host")}`;
-}
+import { appOrigin } from "@/lib/origin";
 
 /** Starts Stripe Checkout for a plan. Admins only; reachable even when the trial has ended. */
 export async function startCheckout(form: FormData) {

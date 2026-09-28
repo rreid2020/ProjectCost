@@ -67,7 +67,7 @@ To test payments, put test-mode keys in `.env.local` and forward webhooks with t
 | Timesheets | Log time, approve in bulk; rates and burden are captured at entry |
 | WIP & month-end | Surety-format WIP schedule (cost-to-cost), under/over billings, loss provision, reversing WIP JE, burden JE, saved period snapshots |
 | Cost codes | Company cost-code library (CSI-style) |
-| QuickBooks & settings | Connection status, company defaults, sync log |
+| QuickBooks & settings | Connect/disconnect QuickBooks, company defaults, sync log |
 
 ## Accounting conventions (the choices built into the engine)
 
@@ -97,12 +97,22 @@ scripts/                 migrate + local reset
 drizzle/                 SQL migrations (regenerate with `npm run db:generate` after schema changes)
 ```
 
-## Getting ready for milestone 2 (QuickBooks connection)
+## QuickBooks Online connection
 
-1. At developer.intuit.com, open your app → **Keys & credentials** (Development/sandbox).
-2. Add the redirect URI `http://localhost:3000/api/qbo/callback`.
-3. Put the Client ID and Client Secret into `.env.local` (and Vercel), **not** `.env.example`, and never paste them into chat or commit them.
-   Each company connects its own QuickBooks file; tokens will be stored per company, encrypted.
-4. Keep the sandbox company handy. Milestone 2 will import its customers, projects, bills, purchases and time, then write back cost codes, time, invoices and JEs.
+Each company connects its own QuickBooks file from **QuickBooks & settings → Connect to QuickBooks** (admins only).
+Tokens are stored per company, encrypted with AES-256-GCM (`QBO_TOKEN_KEY`), refreshed automatically, and revoked at Intuit on disconnect.
+One QuickBooks file can be connected to only one ProjectCost workspace.
 
-Note: Intuit only opens the QBO **Projects API** to App Partner Program **Silver tier or higher**. Until then, milestone 2 treats QBO sub-customers (jobs) as projects.
+Set it up (sandbox first):
+
+1. At developer.intuit.com, open your app → **Keys & credentials → Development**.
+2. Under **Redirect URIs**, add `http://localhost:3000/api/qbo/callback` (and later `https://<your-domain>/api/qbo/callback` under Production).
+3. Put the Client ID and Client Secret into `.env.local` as `QBO_CLIENT_ID` / `QBO_CLIENT_SECRET` (never into `.env.example`, chat, or git).
+   `QBO_TOKEN_KEY` must also be set (see `.env.example`). Restart `npm run dev`.
+4. In ProjectCost, click **Connect to QuickBooks**, sign in to Intuit, and choose your **sandbox company**.
+
+For production: use the Production keys, set `QBO_ENVIRONMENT=production`, and use a different `QBO_TOKEN_KEY` than dev.
+Intuit's app review expects the official "Connect to QuickBooks" button artwork and a disconnect link, both of which should be in place before you submit.
+
+Next: the first import (customers, projects/sub-customers, vendors, items, bills, purchases, time) and write-back.
+Note: Intuit only opens the QBO **Projects API** to App Partner Program **Silver tier or higher**. Until then, QBO sub-customers (jobs) are treated as projects.

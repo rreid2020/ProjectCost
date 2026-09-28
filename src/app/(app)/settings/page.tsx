@@ -20,7 +20,7 @@ const QBO_NOTICES: Record<string, { tone: "good" | "warn"; text: string }> = {
   expired: { tone: "warn", text: "The QuickBooks authorization has expired or was revoked. Disconnect and connect again." },
   test_failed: { tone: "warn", text: "QuickBooks didn't answer. See the sync log below for details." },
   error: { tone: "warn", text: "The connection didn't complete. See the sync log below for details." },
-  not_configured: { tone: "warn", text: "The Intuit app keys aren't set up yet." },
+  not_configured: { tone: "warn", text: "Connecting to QuickBooks isn't available yet." },
   admin_only: { tone: "warn", text: "Only organization admins can connect QuickBooks." },
 };
 
@@ -43,13 +43,18 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               <dt className="text-slate-500">Environment</dt><dd className="capitalize">{qboEnvironment()}</dd>
               <dt className="text-slate-500">Company (realm) ID</dt><dd className="font-mono text-xs">{company.qboRealmId ?? "—"}</dd>
               {company.qboConnectedAt && <><dt className="text-slate-500">Connected</dt><dd>{new Date(company.qboConnectedAt).toLocaleString("en-CA")}</dd></>}
-              {!configured && <><dt className="text-slate-500">Intuit app keys</dt><dd><Badge tone="amber">Missing</Badge></dd></>}
             </dl>
             {!configured ? (
-              <p className="text-xs text-slate-600">
-                To enable the connection, set <code className="rounded bg-slate-100 px-1">QBO_CLIENT_ID</code>, <code className="rounded bg-slate-100 px-1">QBO_CLIENT_SECRET</code> and <code className="rounded bg-slate-100 px-1">QBO_TOKEN_KEY</code> in
-                the app&apos;s environment, and add <code className="rounded bg-slate-100 px-1">{redirect}</code> as a redirect URI in your Intuit developer app. The README has the steps.
-              </p>
+              // The Intuit app keys belong to ProjectCost (set once by the operator), never to a tenant.
+              // Setup instructions only show in development; customers just see that it isn't available.
+              process.env.NODE_ENV === "development" ? (
+                <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <span className="font-medium">Developer setup (not shown to customers):</span> set <code>QBO_CLIENT_ID</code>, <code>QBO_CLIENT_SECRET</code> and <code>QBO_TOKEN_KEY</code> in
+                  the server environment and add <code>{redirect}</code> as a redirect URI in the ProjectCost Intuit app. Every company then connects its own file with the button that appears here.
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">Connecting to QuickBooks isn&apos;t available yet. Please contact support.</p>
+              )
             ) : !isAdmin ? (
               <p className="text-xs text-slate-500">Only organization admins can connect or disconnect QuickBooks.</p>
             ) : company.qboRealmId ? (

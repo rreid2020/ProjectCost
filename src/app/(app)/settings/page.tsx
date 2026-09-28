@@ -5,6 +5,7 @@ import { Card, PageHeader, Badge } from "@/components/ui";
 import { fmtDate, pct } from "@/lib/format";
 import { CompanyFields } from "@/components/CompanyFields";
 import { updateCompanySettings } from "@/app/company-actions";
+import { removeSampleData } from "@/app/actions";
 import { disconnectQbo, testQboConnection } from "@/app/qbo-actions";
 import { qboConfigured, qboEnvironment, redirectUri } from "@/lib/qbo";
 import { appOrigin } from "@/lib/origin";
@@ -90,6 +91,22 @@ export default async function Settings({ searchParams }: { searchParams: Promise
           )}
         </Card>
       </div>
+      {isAdmin && company.sampleDataLoadedAt && (
+        <Card title="Sample data" className="mt-5" action={<Badge tone="amber">Loaded {fmtDate(company.sampleDataLoadedAt.slice(0, 10))}</Badge>}>
+          <form action={removeSampleData} className="grid gap-3 p-4 text-sm md:grid-cols-[1fr_auto] md:items-end">
+            <div className="grid gap-2">
+              <p className="text-slate-600">
+                This workspace has the Northline Mechanical sample data. Remove it before importing from QuickBooks. This deletes <span className="font-medium">all</span> projects,
+                change orders, bills, costs, timesheets, WIP snapshots, customers, vendors, employees and cost codes here, including any you added.
+                Company settings, your team, billing and the QuickBooks connection stay.
+              </p>
+              <label className="flex items-center gap-2"><input type="checkbox" name="confirm" required /> I understand this can&apos;t be undone</label>
+            </div>
+            <button className="btn bg-red-700 hover:bg-red-800">Remove sample data</button>
+          </form>
+        </Card>
+      )}
+
       <Card title="Sync log" className="mt-5">
         {logs.length === 0 ? <p className="px-4 py-3 text-sm text-slate-500">Nothing synced yet.</p> : (
           <table className="grid-table">

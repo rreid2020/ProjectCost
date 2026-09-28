@@ -134,3 +134,35 @@ describe("roles and idempotency", () => {
     expect(await sovCount()).toBe(before + 1);
   });
 });
+
+// Runs last: it empties company A.
+describe("removing sample data", () => {
+  const counts = async (companyId: string) => ({
+    projects: (await db.select().from(s.projects).where(eq(s.projects.companyId, companyId))).length,
+    costs: (await db.select().from(s.costTransactions).where(eq(s.costTransactions.companyId, companyId))).length,
+    time: (await db.select().from(s.timeEntries).where(eq(s.timeEntries.companyId, companyId))).length,
+    codes: (await db.select().from(s.costCodes).where(eq(s.costCodes.companyId, companyId))).length,
+  });
+
+  it("needs an admin and the confirmation tick", async () => {
+    const a = (await db.query.companies.findFirst({ where: eq(s.companies.id, A.id) }))!;
+    actAs(a, false);
+    await expect(actions.removeSampleData(form({ confirm: "on" }))).rejects.toThrow("admins");
+    actAs(a);
+    await actions.removeSampleData(form({}));
+    expect((await counts(A.id)).projects).toBe(6);
+  });
+
+  it("empties only the caller's workspace and clears the flag", async () => {
+    const before = await counts(B.id);
+    const a = (await db.query.companies.findFirst({ where: eq(s.companies.id, A.id) }))!;
+    expect(a.sampleDataLoadedAt).not.toBeNull();
+    actAs(a);
+    await actions.removeSampleData(form({ confirm: "on" }));
+    expect(await counts(A.id)).toEqual({ projects: 0, costs: 0, time: 0, codes: 0 });
+    expect(await counts(B.id)).toEqual(before);
+    const after = (await db.query.companies.findFirst({ where: eq(s.companies.id, A.id) }))!;
+    expect(after.sampleDataLoadedAt).toBeNull();
+    expect(await loadPortfolio(A.id)).toEqual([]);
+  });
+});

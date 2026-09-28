@@ -23,7 +23,7 @@ export async function loadDemoData(db: DB, companyId: string) {
   const timeRows: (typeof s.timeEntries.$inferInsert)[] = [];
   const costRows: (typeof s.costTransactions.$inferInsert)[] = [];
 
-  await db.update(s.companies).set({ closedThrough: "2026-08-31" }).where(eq(s.companies.id, companyId));
+  await db.update(s.companies).set({ closedThrough: "2026-08-31", sampleDataLoadedAt: now }).where(eq(s.companies.id, companyId));
   const codeDefs: [string, string, string][] = [
     ["01-100", "Project management & supervision", "LABOUR"],
     ["01-500", "Temporary facilities & site setup", "OTHER"],

@@ -15,6 +15,13 @@
       "when": 1790600878057,
       "tag": "0001_qbo_connection",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790602901000,
+      "tag": "0002_sample_data_flag",
+      "breakpoints": true
     }
   ]
 }

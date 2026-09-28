@@ -167,3 +167,26 @@ export async function closeWipPeriod(form: FormData) {
   await log(t, "JournalEntry", `WIP entry for ${periodEnd} (reversing on day 1 of next period)`);
   revalidatePath("/wip");
 }
+
+// ---------- Sample data ----------
+/**
+ * Clears the demo data from a workspace that loaded it at onboarding: projects and everything under them,
+ * costs, time, customers, vendors, employees and cost codes. Company settings, team, billing and the
+ * QuickBooks connection stay. Only offered while sample_data_loaded_at is set.
+ */
+export async function removeSampleData(form: FormData) {
+  const t = await requireAdmin({ allowInactive: true });
+  if (!t.company.sampleDataLoadedAt || form.get("confirm") !== "on") return;
+  const c = t.company.id;
+  await db.transaction(async (tx) => {
+    // children before parents; every delete is scoped to this company
+    for (const table of [
+      s.progressBillLines, s.progressBills, s.sovLines, s.wipSnapshots, s.forecasts, s.changeOrderLines, s.changeOrders,
+      s.budgetLines, s.costTransactions, s.timeEntries, s.projects, s.employees, s.vendors, s.customers, s.costCodes,
+    ]) await tx.delete(table).where(eq(table.companyId, c));
+    await tx.update(s.companies).set({ sampleDataLoadedAt: null, closedThrough: null }).where(eq(s.companies.id, c));
+    await tx.insert(s.syncLogs).values({ companyId: c, userId: t.userId, entity: "System", direction: "PUSH", status: "OK", message: "Sample data removed", createdAt: nowIso() });
+  });
+  revalidatePath("/", "layout");
+  redirect("/dashboard");
+}

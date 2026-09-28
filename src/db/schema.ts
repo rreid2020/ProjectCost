@@ -27,6 +27,7 @@ export const companies = pgTable("company", {
   defaultHoldbackBp: integer("default_holdback_bp").notNull().default(1000),
   defaultTaxBp: integer("default_tax_bp").notNull().default(1300),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+  sampleDataLoadedAt: text("sample_data_loaded_at"), // set while the workspace holds the demo data
   deletedAt: text("deleted_at"), // set when the Clerk organization is deleted
   // billing (Stripe)
   trialEndsAt: text("trial_ends_at"),

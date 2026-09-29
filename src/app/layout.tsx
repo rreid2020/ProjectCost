@@ -10,7 +10,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="antialiased">
+      {/* Browser extensions (e.g. Grammarly) add attributes to <body> before React hydrates; ignore those only. */}
+      <body className="antialiased" suppressHydrationWarning>
         <ClerkProvider
           signInFallbackRedirectUrl="/dashboard"
           signUpFallbackRedirectUrl="/onboarding"

@@ -30,6 +30,12 @@ export const companies = pgTable("company", {
   overheadBasis: text("overhead_basis").notNull().default("labour_cost"), // labour_cost | labour_hours | direct_cost
   overheadRateMode: text("overhead_rate_mode").notNull().default("calculated"), // calculated | manual
   overheadManualRate: integer("overhead_manual_rate"), // bp of base (labour_cost, direct_cost) or cents per hour (labour_hours)
+  // GL accounts (QuickBooks account ids) used for capital and build-for-sale project entries
+  cipAccountId: text("cip_account_id"), // Construction in progress (asset)
+  wipInventoryAccountId: text("wip_inventory_account_id"), // Inventory: work in process (asset)
+  finishedGoodsAccountId: text("finished_goods_account_id"), // Inventory: finished goods (asset)
+  cogsAccountId: text("cogs_account_id"), // Cost of goods sold, for units sold
+  labourCreditAccountId: text("labour_credit_account_id"), // credited when labour is capitalized or put into inventory
   defaultHoldbackBp: integer("default_holdback_bp").notNull().default(1000),
   defaultTaxBp: integer("default_tax_bp").notNull().default(1300),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -124,7 +130,8 @@ export const projects = pgTable(
   {
     id: id(),
     companyId: companyId(),
-    customerId: text("customer_id").notNull(),
+    customerId: text("customer_id"), // required for CONTRACT; optional for CAPITAL / INVENTORY
+    projectType: text("project_type").notNull().default("CONTRACT"), // CONTRACT | CAPITAL | INVENTORY
     number: text("number").notNull(),
     name: text("name").notNull(),
     status: text("status").notNull().default("ACTIVE"), // BID | ACTIVE | COMPLETE
@@ -136,6 +143,9 @@ export const projects = pgTable(
     startDate: text("start_date"),
     endDate: text("end_date"),
     qboProjectId: text("qbo_project_id"),
+    unitsPlanned: integer("units_planned").notNull().default(1), // INVENTORY: units this project produces (editable)
+    inServiceDate: text("in_service_date"), // CAPITAL: date capitalized to the fixed asset
+    assetAccountId: text("asset_account_id"), // CAPITAL: fixed-asset account it's capitalized to
   },
   (t) => [
     uniqueIndex("project_company_number").on(t.companyId, t.number),
@@ -143,6 +153,76 @@ export const projects = pgTable(
     unique("project_tenant").on(t.companyId, t.id),
     foreignKey({ name: "project_customer_fk", columns: [t.companyId, t.customerId], foreignColumns: [customers.companyId, customers.id] }),
   ],
+);
+
+// How QuickBooks transactions find this project, beyond qbo_project_id: any customer, class, location or GL account.
+// One QuickBooks entity feeds at most one project.
+export const projectQboLinks = pgTable(
+  "project_qbo_link",
+  {
+    id: id(),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
+    kind: text("kind").notNull(), // customer | class | department | account
+    qboId: text("qbo_id").notNull(),
+    qboName: text("qbo_name"),
+  },
+  (t) => [
+    uniqueIndex("project_qbo_link_company_kind_qbo").on(t.companyId, t.kind, t.qboId),
+    foreignKey({ name: "project_qbo_link_project_fk", columns: [t.companyId, t.projectId], foreignColumns: [projects.companyId, projects.id] }).onDelete("cascade"),
+  ],
+);
+
+// Units completed and sold on build-for-sale projects. Drives WIP -> finished goods -> COGS.
+export const projectUnitEvents = pgTable(
+  "project_unit_event",
+  {
+    id: id(),
+    companyId: companyId(),
+    projectId: text("project_id").notNull(),
+    kind: text("kind").notNull(), // COMPLETED | SOLD
+    date: text("date").notNull(),
+    units: integer("units").notNull(),
+    saleAmountCents: cents("sale_amount_cents"), // SOLD: optional, for margin per unit
+    notes: text("notes"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    index("project_unit_event_project").on(t.projectId),
+    foreignKey({ name: "project_unit_event_project_fk", columns: [t.companyId, t.projectId], foreignColumns: [projects.companyId, projects.id] }).onDelete("cascade"),
+  ],
+);
+
+// Chart of accounts from QuickBooks. isProjectCost: lines posted here are project costs even without a customer
+// (null = default: Cost of Goods Sold accounts yes, others no).
+export const glAccounts = pgTable(
+  "gl_account",
+  {
+    id: id(),
+    companyId: companyId(),
+    qboId: text("qbo_id").notNull(),
+    name: text("name").notNull(),
+    fullName: text("full_name").notNull(),
+    accountType: text("account_type").notNull(),
+    accountSubType: text("account_sub_type"),
+    active: boolean("active").notNull().default(true),
+    isProjectCost: boolean("is_project_cost"),
+  },
+  (t) => [uniqueIndex("gl_account_company_qbo").on(t.companyId, t.qboId)],
+);
+
+// QuickBooks classes and locations (Department in the API), for linking to projects.
+export const qboTags = pgTable(
+  "qbo_tag",
+  {
+    id: id(),
+    companyId: companyId(),
+    kind: text("kind").notNull(), // class | department
+    qboId: text("qbo_id").notNull(),
+    name: text("name").notNull(),
+    active: boolean("active").notNull().default(true),
+  },
+  (t) => [uniqueIndex("qbo_tag_company_kind_qbo").on(t.companyId, t.kind, t.qboId)],
 );
 
 // FK helpers for child tables: (company_id, x_id) -> parent(company_id, id)
@@ -224,7 +304,7 @@ export const costTransactions = pgTable(
     description: text("description").notNull(),
     amountCents: cents("amount_cents").notNull(), // pre-tax job cost
     taxCents: cents("tax_cents").notNull().default(0), // recoverable ITC (CA) — not job cost
-    qboTxnType: text("qbo_txn_type"), // Bill | Purchase | VendorCredit
+    qboTxnType: text("qbo_txn_type"), // Bill | Purchase | VendorCredit | JournalEntry
     qboTxnId: text("qbo_txn_id"),
     qboLineId: text("qbo_line_id"),
     qboCustomerName: text("qbo_customer_name"), // the QBO customer/job the line was tagged to, shown when it needs coding
@@ -434,6 +514,14 @@ export const projectRelations = relations(projects, ({ one, many }) => ({
   sovLines: many(sovLines),
   progressBills: many(progressBills),
   qboInvoices: many(qboInvoices),
+  qboLinks: many(projectQboLinks),
+  unitEvents: many(projectUnitEvents),
+}));
+export const projectQboLinkRelations = relations(projectQboLinks, ({ one }) => ({
+  project: one(projects, { fields: [projectQboLinks.projectId], references: [projects.id] }),
+}));
+export const projectUnitEventRelations = relations(projectUnitEvents, ({ one }) => ({
+  project: one(projects, { fields: [projectUnitEvents.projectId], references: [projects.id] }),
 }));
 export const budgetLineRelations = relations(budgetLines, ({ one }) => ({
   project: one(projects, { fields: [budgetLines.projectId], references: [projects.id] }),

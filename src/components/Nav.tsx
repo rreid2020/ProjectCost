@@ -11,6 +11,7 @@ const items = [
   { href: "/wip", label: "WIP & month-end" },
   { href: "/overhead", label: "Overhead" },
   { href: "/cost-codes", label: "Cost codes" },
+  { href: "/accounts", label: "Accounts" },
   { href: "/settings", label: "QuickBooks & settings" },
   { href: "/team", label: "Team" },
   { href: "/billing", label: "Billing" },

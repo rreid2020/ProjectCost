@@ -166,3 +166,37 @@ describe("removing sample data", () => {
     expect(await loadPortfolio(A.id)).toEqual([]);
   });
 });
+
+describe("project types, links and units across companies", () => {
+  it("can't link another company's QuickBooks records, touch its units, or use its customer", async () => {
+    const [a2] = await db.insert(s.companies).values({ name: "A2", clerkOrgId: "org_A2" }).returning();
+    const [b2] = await db.insert(s.companies).values({ name: "B2", clerkOrgId: "org_B2" }).returning();
+    await db.insert(s.qboTags).values({ companyId: b2.id, kind: "class", qboId: "B-CLASS", name: "B class" });
+    const [bCust] = await db.insert(s.customers).values({ companyId: b2.id, name: "B customer" }).returning();
+    const [bInv] = await db.insert(s.projects).values({ companyId: b2.id, projectType: "INVENTORY", number: "INV", name: "B build", originalContractCents: 0 }).returning();
+
+    actAs(a2);
+    // A creates a capital project (no customer needed) ...
+    await actions.createProject(form({ projectType: "CAPITAL", number: "CAP-1", name: "A shop" }));
+    const aCap = (await db.query.projects.findFirst({ where: and(eq(s.projects.companyId, a2.id), eq(s.projects.number, "CAP-1")) }))!;
+    expect(aCap).toMatchObject({ projectType: "CAPITAL", customerId: null });
+    // ... but a contract without a customer is refused, and B's customer can't be used (composite FK)
+    await expect(actions.createProject(form({ projectType: "CONTRACT", number: "C-1", name: "x" }))).rejects.toThrow("needs a customer");
+    await expect(actions.createProject(form({ projectType: "CONTRACT", number: "C-2", name: "x", customerId: bCust.id }))).rejects.toThrow();
+    // B's class isn't linkable from A
+    await expect(actions.addProjectLink(form({ projectId: aCap.id, kind: "class", qboId: "B-CLASS" }))).rejects.toThrow("found");
+    // A can't record units on B's project
+    await expect(actions.addUnitEvent(form({ projectId: bInv.id, kind: "COMPLETED", date: "2026-09-01", units: "1" }))).rejects.toThrow("Project not found");
+    expect(await db.select().from(s.projectUnitEvents).where(eq(s.projectUnitEvents.companyId, b2.id))).toHaveLength(0);
+  });
+
+  it("won't let two projects claim the same QuickBooks class", async () => {
+    const [c] = await db.insert(s.companies).values({ name: "C3", clerkOrgId: "org_C3" }).returning();
+    await db.insert(s.qboTags).values({ companyId: c.id, kind: "class", qboId: "K1", name: "North" });
+    const [p1] = await db.insert(s.projects).values({ companyId: c.id, projectType: "CAPITAL", number: "P1", name: "one", originalContractCents: 0 }).returning();
+    const [p2] = await db.insert(s.projects).values({ companyId: c.id, projectType: "CAPITAL", number: "P2", name: "two", originalContractCents: 0 }).returning();
+    actAs(c);
+    await actions.addProjectLink(form({ projectId: p1.id, kind: "class", qboId: "K1" }));
+    await expect(actions.addProjectLink(form({ projectId: p2.id, kind: "class", qboId: "K1" }))).rejects.toThrow("already feeds project P1");
+  });
+});

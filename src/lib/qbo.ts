@@ -92,10 +92,23 @@ async function accessToken(companyId: string, force = false) {
   });
 }
 
+const MAX_THROTTLE_RETRIES = 5;
+let retryBaseMs = 1000;
+/** Tests shorten the back-off. */
+export const setRetryBaseMs = (ms: number) => { retryBaseMs = ms; };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function retryDelayMs(res: Response, attempt: number) {
+  const after = Number(res.headers.get("retry-after"));
+  if (Number.isFinite(after) && after > 0) return Math.min(after * 1000, 60_000);
+  return Math.min(retryBaseMs * 2 ** (attempt - 1), 16 * retryBaseMs) + Math.floor(Math.random() * retryBaseMs * 0.25);
+}
+
 /** GET/POST against the company's QuickBooks file: /v3/company/{realmId}/{path}. Retries once on 401. */
 export async function qboFetch<T = unknown>(companyId: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    const { token, conn } = await accessToken(companyId, attempt > 0);
+  let forceRefresh = false, refreshed = false, throttled = 0;
+  for (;;) {
+    const { token, conn } = await accessToken(companyId, forceRefresh);
+    forceRefresh = false;
     if (conn.environment !== qboEnvironment()) throw new QboError(`This connection was made in ${conn.environment}; the app is set to ${qboEnvironment()}. Reconnect QuickBooks.`, 0, null, true);
     const url = new URL(`${apiBase(conn.environment as QboEnvironment)}/v3/company/${conn.realmId}/${path.replace(/^\//, "")}`);
     url.searchParams.set("minorversion", MINOR_VERSION);
@@ -105,7 +118,9 @@ export async function qboFetch<T = unknown>(companyId: string, path: string, ini
       body: init.body ? JSON.stringify(init.body) : undefined,
       cache: "no-store",
     });
-    if (res.status === 401 && attempt === 0) continue;
+    if (res.status === 401 && !refreshed) { refreshed = forceRefresh = true; continue; }
+    // QuickBooks throttles per company file (about 10 concurrent / 500 per minute): back off and retry
+    if (res.status === 429 && throttled < MAX_THROTTLE_RETRIES) { await sleep(retryDelayMs(res, ++throttled)); continue; }
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       const detail = json?.Fault?.Error?.[0];

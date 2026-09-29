@@ -22,7 +22,9 @@ export function BudgetTab({ data, overhead }: { data: LoadedProject; overhead: O
     <div className="grid gap-5">
       {e.originalBudget === 0 && (
         <p className="rounded-md bg-amber-50 px-4 py-2 text-sm text-amber-900">
-          This project has no budget yet, so % complete and earned revenue aren&apos;t meaningful. Enter the original budget by cost code below, and the contract value under Setup.
+          {p.projectType === "CONTRACT"
+            ? <>This project has no budget yet, so % complete and earned revenue aren&apos;t meaningful. Enter the original budget by cost code below, and the contract value under Setup.</>
+            : <>This project has no budget yet. Enter it by cost code below to track variance and forecast.</>}
         </p>
       )}
       <Card title="Budget vs. actual by cost code" action={<span className="text-xs text-slate-500">Edit “Est. to complete” to override remaining budget · blank = remaining budget</span>}>
@@ -97,7 +99,7 @@ export function BudgetTab({ data, overhead }: { data: LoadedProject; overhead: O
         </div>
       </Card>
 
-      <div className="grid gap-5 md:grid-cols-3">
+      <div className={`grid gap-5 ${p.projectType === "CONTRACT" ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
         <Card title="By cost type">
           <table className="grid-table">
             <thead><tr><th>Type</th><th className="num">Revised budget</th><th className="num">Actual</th><th className="num">EAC</th><th className="num">Variance</th></tr></thead>
@@ -115,7 +117,7 @@ export function BudgetTab({ data, overhead }: { data: LoadedProject; overhead: O
             <dt className="text-slate-500">Hours pending approval</dt><dd className="num">{(data.labour.pendingHours / 100).toLocaleString("en-CA")}</dd>
           </dl>
         </Card>
-        <Card title="Overhead" action={<Link href="/overhead" className="text-xs text-brand-600 hover:underline">How the rate is set →</Link>}>
+        {p.projectType === "CONTRACT" && <Card title="Overhead" action={<Link href="/overhead" className="text-xs text-brand-600 hover:underline">How the rate is set →</Link>}>
           {!overhead ? <p className="px-4 py-3 text-sm text-slate-500">No overhead rate yet. <Link href="/overhead" className="underline">Set it up</Link>.</p> : (
             <dl className="grid grid-cols-2 gap-x-6 gap-y-2 px-4 py-3 text-sm">
               <dt className="text-slate-500">Rate</dt><dd className="text-right">{overhead.rateLabel}</dd>
@@ -127,7 +129,7 @@ export function BudgetTab({ data, overhead }: { data: LoadedProject; overhead: O
             </dl>
           )}
           <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Management view only. Not in job cost, % complete or WIP.</p>
-        </Card>
+        </Card>}
       </div>
     </div>
   );

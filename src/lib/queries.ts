@@ -2,6 +2,7 @@ import "server-only";
 import { db, schema as s } from "@/db";
 import { and, eq, isNull, asc, desc, inArray, count, or } from "drizzle-orm";
 import { labourCost, projectEconomics, healthFlags, type CodeInput, type CostType } from "./engine";
+import { inventoryFlow, capitalFlow, type DatedCost, type UnitEvent } from "./project-accounting";
 
 export const UNCODED = "uncoded";
 
@@ -17,7 +18,7 @@ export async function loadProject(companyId: string, projectId: string) {
   });
   if (!project) return null;
 
-  const [codes, budget, cos, costs, time, fc, sov, bills, qboInvoices] = await Promise.all([
+  const [codes, budget, cos, costs, time, fc, sov, bills, qboInvoices, links, unitEvents] = await Promise.all([
     getCostCodes(companyId),
     db.select().from(s.budgetLines).where(and(eq(s.budgetLines.projectId, projectId), eq(s.budgetLines.companyId, companyId))),
     db.query.changeOrders.findMany({
@@ -43,6 +44,8 @@ export async function loadProject(companyId: string, projectId: string) {
       orderBy: asc(s.progressBills.number),
     }),
     db.select().from(s.qboInvoices).where(and(eq(s.qboInvoices.projectId, projectId), eq(s.qboInvoices.companyId, companyId))).orderBy(desc(s.qboInvoices.date)),
+    db.select().from(s.projectQboLinks).where(and(eq(s.projectQboLinks.projectId, projectId), eq(s.projectQboLinks.companyId, companyId))),
+    db.select().from(s.projectUnitEvents).where(and(eq(s.projectUnitEvents.projectId, projectId), eq(s.projectUnitEvents.companyId, companyId))).orderBy(asc(s.projectUnitEvents.date)),
   ]);
 
   const approvedCos = cos.filter((c) => c.status === "APPROVED");
@@ -83,10 +86,24 @@ export async function loadProject(companyId: string, projectId: string) {
     holdbackBp: project.holdbackBp,
   });
 
+  // Balance-sheet view for capital and build-for-sale projects
+  const datedCosts: DatedCost[] = costs.map((c) => ({ date: c.date, amount: c.amountCents, account: c.qboAccountId }));
+  const datedLabour = time.filter((t) => t.status === "APPROVED").map((t) => ({ date: t.date, amount: labourCost(t.hoursX100, t.payRateCents, t.burdenBp).total }));
+  const allDated: DatedCost[] = [...datedCosts, ...datedLabour.map((l) => ({ ...l, account: null }))];
+  const events: UnitEvent[] = unitEvents.map((e) => ({ id: e.id, kind: e.kind as UnitEvent["kind"], date: e.date, units: e.units, saleAmountCents: e.saleAmountCents }));
+  const inventory = project.projectType === "INVENTORY" ? inventoryFlow(allDated, project.unitsPlanned, events) : null;
+  const capital = project.projectType === "CAPITAL" ? capitalFlow(allDated, project.inServiceDate) : null;
+
   return {
     project, codes, changeOrders: cos, costs, time, sov, bills, qboInvoices, billedInQbo, econ,
+    links, unitEvents, inventory, capital, datedCosts, datedLabour, events,
     budgetLines: budget,
-    flags: healthFlags(econ),
+    // revenue-based flags (loss, fade, underbilling) only apply to customer contracts
+    flags: project.projectType === "CONTRACT" ? healthFlags(econ) : [
+      ...(econ.revisedBudget > 0 && econ.eac > econ.revisedBudget ? [{ level: "red" as const, text: "Forecast over budget" }] : []),
+      ...healthFlags(econ).filter((f) => f.text.includes("over budget")),
+      ...(inventory?.warnings.length || capital?.warnings.length ? [{ level: "amber" as const, text: "Check units / in-service date" }] : []),
+    ],
     labour: { wages, burden, approvedHours, pendingHours, billableTm },
     pendingCoRevenue: cos.filter((c) => c.status === "PENDING").reduce((a, c) => a + c.contractAmountCents, 0),
   };
@@ -94,9 +111,9 @@ export async function loadProject(companyId: string, projectId: string) {
 
 export type LoadedProject = NonNullable<Awaited<ReturnType<typeof loadProject>>>;
 
-export async function loadPortfolio(companyId: string, statuses: string[] = ["ACTIVE"]) {
+export async function loadPortfolio(companyId: string, statuses: string[] = ["ACTIVE"], types: string[] = ["CONTRACT", "CAPITAL", "INVENTORY"]) {
   const list = await db.select({ id: s.projects.id }).from(s.projects)
-    .where(and(eq(s.projects.companyId, companyId), inArray(s.projects.status, statuses)))
+    .where(and(eq(s.projects.companyId, companyId), inArray(s.projects.status, statuses), inArray(s.projects.projectType, types)))
     .orderBy(asc(s.projects.number));
   const loaded = await Promise.all(list.map((p) => loadProject(companyId, p.id)));
   return loaded.filter(Boolean) as LoadedProject[];

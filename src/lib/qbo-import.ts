@@ -65,6 +65,17 @@ export function pagedQuery(fetchQuery: (q: string) => Promise<QboRecord>): QboQu
   };
 }
 
+/** Wraps an async function so at most `n` calls run at once. */
+export function limited<A extends unknown[], R>(n: number, fn: (...args: A) => Promise<R>) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async (...args: A): Promise<R> => {
+    if (active >= n) await new Promise<void>((resolve) => waiting.push(resolve));
+    active++;
+    try { return await fn(...args); } finally { active--; waiting.shift()?.(); }
+  };
+}
+
 export async function runImport({ companyId, query, now = new Date() }: { companyId: string; query: QboQuery; now?: Date }): Promise<ImportSummary> {
   const company = await db.query.companies.findFirst({ where: eq(s.companies.id, companyId) });
   if (!company) throw new Error("Company not found.");
@@ -76,11 +87,22 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
   const allActive = "Active IN (true, false)";
 
   // ---------- 1. read everything from QuickBooks (no writes yet) ----------
-  const [accounts, items, qCustomers, qVendors, qEmployees, bills, purchases, vendorCredits, times, invoices, creditMemos, estimates] = await Promise.all([
-    query("Account", allActive), query("Item", allActive), query("Customer", allActive), query("Vendor", allActive), query("Employee", allActive),
-    query("Bill", inWindow), query("Purchase", inWindow), query("VendorCredit", inWindow), query("TimeActivity", inWindow),
-    query("Invoice", inWindow), query("CreditMemo", inWindow), query("Estimate"),
+  // At most 4 queries at a time: QuickBooks allows about 10 concurrent requests per company file.
+  const q = limited(4, query);
+  const [accounts, items, qCustomers, qVendors, qEmployees, bills, purchases, vendorCredits, times, invoices, creditMemos, estimates, classes, departments, journals] = await Promise.all([
+    q("Account", allActive), q("Item", allActive), q("Customer", allActive), q("Vendor", allActive), q("Employee", allActive),
+    q("Bill", inWindow), q("Purchase", inWindow), q("VendorCredit", inWindow), q("TimeActivity", inWindow),
+    q("Invoice", inWindow), q("CreditMemo", inWindow), q("Estimate"),
+    q("Class", allActive), q("Department", allActive), q("JournalEntry", inWindow),
   ]);
+
+  // Project links (customer / class / location / account) and which GL accounts count as project cost
+  const [links, glRows] = await Promise.all([
+    db.select().from(s.projectQboLinks).where(eq(s.projectQboLinks.companyId, companyId)),
+    db.select().from(s.glAccounts).where(eq(s.glAccounts.companyId, companyId)),
+  ]);
+  const linked = new Map(links.map((l) => [`${l.kind}|${l.qboId}`, l.projectId]));
+  const costFlag = new Map(glRows.map((g) => [g.qboId, g.isProjectCost]));
 
   const accountType = new Map(accounts.map((a) => [String(a.Id), String(a.AccountType)]));
   const itemById = new Map(items.map((i) => [String(i.Id), i]));
@@ -94,21 +116,58 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     return c;
   };
 
-  type Line = { txn: QboRecord; type: "Bill" | "Purchase" | "VendorCredit"; line: QboRecord; detail: QboRecord };
+  // Accounts whose lines are project cost even without a customer: the company's choice, else Cost of Goods Sold.
+  const isProjectCostAccount = (id: string) => costFlag.get(id) ?? accountType.get(id) === "Cost of Goods Sold";
+  const EXPENSE_TYPES = new Set(["Expense", "Other Expense", "Cost of Goods Sold"]);
+
+  type Ref = { value: string; name?: string } | undefined;
+  type Line = {
+    txn: QboRecord; type: "Bill" | "Purchase" | "VendorCredit" | "JournalEntry"; line: QboRecord; detail: QboRecord;
+    customer: Ref; classRef: Ref; deptRef: Ref; account: string; sign: number;
+  };
   const costLines: Line[] = [];
   for (const [type, txns] of [["Bill", bills], ["Purchase", purchases], ["VendorCredit", vendorCredits]] as const)
     for (const txn of txns) for (const line of txn.Line ?? []) {
       const detail = line.AccountBasedExpenseLineDetail ?? line.ItemBasedExpenseLineDetail;
-      if (detail) costLines.push({ txn, type, line, detail });
+      if (!detail) continue;
+      costLines.push({
+        txn, type, line, detail, customer: detail.CustomerRef, classRef: detail.ClassRef ?? txn.ClassRef, deptRef: txn.DepartmentRef,
+        account: String(detail.AccountRef?.value ?? itemById.get(String(detail.ItemRef?.value))?.ExpenseAccountRef?.value ?? ""),
+        sign: type === "VendorCredit" || (type === "Purchase" && txn.Credit === true) ? -1 : 1,
+      });
     }
-  const lineAccount = (l: Line) => String(l.detail.AccountRef?.value ?? itemById.get(String(l.detail.ItemRef?.value))?.ExpenseAccountRef?.value ?? "");
-  const isJobCost = (l: Line) => Boolean(l.detail.CustomerRef?.value) || accountType.get(lineAccount(l)) === "Cost of Goods Sold";
+  for (const txn of journals) {
+    if (String(txn.PrivateNote ?? "").includes("[ProjectCost]")) continue; // entries drafted by ProjectCost: already counted
+    for (const line of txn.Line ?? []) {
+      const detail = line.JournalEntryLineDetail;
+      if (!detail) continue;
+      costLines.push({
+        txn, type: "JournalEntry", line, detail, customer: detail.Entity?.Type === "Customer" ? detail.Entity.EntityRef : undefined,
+        classRef: detail.ClassRef, deptRef: detail.DepartmentRef, account: String(detail.AccountRef?.value ?? ""),
+        sign: detail.PostingType === "Credit" ? -1 : 1,
+      });
+    }
+  }
+  const lineAccount = (l: Line) => l.account;
+  // Which project a line (or time entry) belongs to: customer, then class, then location, then account.
+  let projectIdByQbo = new Map<string, string>();
+  const resolve = (customer: Ref, classRef: Ref, deptRef: Ref, account?: string): string | null =>
+    (customer?.value && (projectIdByQbo.get(String(customer.value)) ?? linked.get(`customer|${customer.value}`))) ||
+    (classRef?.value && linked.get(`class|${classRef.value}`)) ||
+    (deptRef?.value && linked.get(`department|${deptRef.value}`)) ||
+    (account && linked.get(`account|${account}`)) || null;
+  const isJobCost = (l: Line) => {
+    if (isProjectCostAccount(l.account)) return true;
+    // journal lines only count on expense-type accounts (never receivables, income, etc.)
+    if (l.type === "JournalEntry" && !EXPENSE_TYPES.has(accountType.get(l.account) ?? "")) return false;
+    return Boolean(l.customer?.value) || Boolean(resolve(undefined, l.classRef, l.deptRef, l.account));
+  };
 
   // Which QuickBooks customers are projects
   const isJobRecord = (c: QboRecord) => c.Job === true || c.IsProject === true;
   const active = (txnCustomer: unknown) => (txnCustomer ? [String(txnCustomer)] : []);
   const referenced = new Set<string>([
-    ...costLines.filter(isJobCost).flatMap((l) => active(l.detail.CustomerRef?.value)),
+    ...costLines.filter((l) => l.type !== "JournalEntry" || EXPENSE_TYPES.has(accountType.get(l.account) ?? "")).flatMap((l) => active(l.customer?.value)),
     ...times.flatMap((t) => active(t.CustomerRef?.value)),
     ...invoices.flatMap((i) => active(i.CustomerRef?.value)),
     ...creditMemos.flatMap((i) => active(i.CustomerRef?.value)),
@@ -161,7 +220,21 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     }
     summary.projects = projectCustomers.length;
     const projRows = await tx.select({ id: s.projects.id, qbo: s.projects.qboProjectId }).from(s.projects).where(and(eq(s.projects.companyId, c), isNotNull(s.projects.qboProjectId)));
-    const projectIdByQbo = new Map(projRows.map((r) => [r.qbo!, r.id]));
+    projectIdByQbo = new Map(projRows.map((r) => [r.qbo!, r.id]));
+
+    // Chart of accounts (keeps each account's project-cost choice) and classes / locations for linking
+    for (const part of chunk(accounts)) if (part.length)
+      await tx.insert(s.glAccounts).values(part.map((a) => ({
+        companyId: c, qboId: String(a.Id), name: String(a.Name), fullName: String(a.FullyQualifiedName ?? a.Name),
+        accountType: String(a.AccountType), accountSubType: a.AccountSubType ? String(a.AccountSubType) : null, active: a.Active !== false,
+      }))).onConflictDoUpdate({ target: [s.glAccounts.companyId, s.glAccounts.qboId], set: {
+        name: sql`excluded.name`, fullName: sql`excluded.full_name`, accountType: sql`excluded.account_type`,
+        accountSubType: sql`excluded.account_sub_type`, active: sql`excluded.active`,
+      } });
+    const tags = [...classes.map((x) => ({ kind: "class", x })), ...departments.map((x) => ({ kind: "department", x }))];
+    for (const part of chunk(tags)) if (part.length)
+      await tx.insert(s.qboTags).values(part.map(({ kind, x }) => ({ companyId: c, kind, qboId: String(x.Id), name: String(x.FullyQualifiedName ?? x.Name), active: x.Active !== false })))
+        .onConflictDoUpdate({ target: [s.qboTags.companyId, s.qboTags.kind, s.qboTags.qboId], set: { name: sql`excluded.name`, active: sql`excluded.active` } });
 
     // Vendors
     for (const part of chunk(qVendors)) if (part.length)
@@ -219,19 +292,17 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     for (const l of costLines) lineCountByTxn.set(l.txn, (lineCountByTxn.get(l.txn) ?? 0) + Math.abs(Number(l.line.Amount ?? 0)));
     for (const l of costLines) {
       if (!isJobCost(l)) { summary.overheadSkipped++; continue; }
-      const { txn, type, line, detail } = l;
+      const { txn, type, line, detail, sign } = l;
       const rate = Number(txn.ExchangeRate ?? 1);
-      const sign = type === "VendorCredit" || (type === "Purchase" && txn.Credit === true) ? -1 : 1;
       const net = Number(line.Amount ?? 0);
       // Sales tax on the transaction, allocated to lines by amount. Recoverable in Canada (ITC, not job cost); a cost in the US.
       const txnBase = lineCountByTxn.get(txn) || 1;
-      const tax = Number(txn.TxnTaxDetail?.TotalTax ?? 0) * (Math.abs(net) / txnBase);
+      const tax = type === "JournalEntry" ? 0 : Number(txn.TxnTaxDetail?.TotalTax ?? 0) * (Math.abs(net) / txnBase);
       const recoverable = company.region === "CA";
-      const qboCustomer = detail.CustomerRef?.value ? String(detail.CustomerRef.value) : null;
-      const projectId = qboCustomer ? projectIdByQbo.get(qboCustomer) ?? null : null;
+      const projectId = resolve(l.customer, l.classRef, l.deptRef, l.account);
       const costCodeId = detail.ItemRef?.value ? codeIdByItem.get(String(detail.ItemRef.value)) ?? null : null;
-      const vendorRef = txn.VendorRef?.value ?? (txn.EntityRef?.type === "Vendor" ? txn.EntityRef.value : null);
-      const source = type === "Bill" ? "BILL" : type === "VendorCredit" ? "CREDIT" : txn.PaymentType === "Check" ? "CHECK" : "EXPENSE";
+      const vendorRef = txn.VendorRef?.value ?? (txn.EntityRef?.type === "Vendor" ? txn.EntityRef.value : null) ?? (detail.Entity?.Type === "Vendor" ? detail.Entity.EntityRef?.value : null);
+      const source = type === "Bill" ? "BILL" : type === "VendorCredit" ? "CREDIT" : type === "JournalEntry" ? "JE" : txn.PaymentType === "Check" ? "CHECK" : "EXPENSE";
       const key = `${type}|${txn.Id}|${line.Id}`;
       seenCost.add(key);
       costValues.push({
@@ -241,7 +312,8 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
         amountCents: sign * Math.round(cents(net + (recoverable ? 0 : tax)) * rate),
         taxCents: recoverable ? sign * Math.round(cents(tax) * rate) : 0,
         vendorId: vendorRef ? vendorIdByQbo.get(String(vendorRef)) ?? null : null,
-        projectId, costCodeId, qboCustomerName: detail.CustomerRef?.name ? String(detail.CustomerRef.name) : null,
+        projectId, costCodeId,
+        qboCustomerName: l.customer?.name ? String(l.customer.name) : l.classRef?.name ? `Class: ${l.classRef.name}` : l.deptRef?.name ? `Location: ${l.deptRef.name}` : null,
         qboCurrency: txn.CurrencyRef?.value ? String(txn.CurrencyRef.value) : null, qboLineAmountCents: sign * cents(net), qboExchangeRate: String(rate),
         qboAccountId: lineAccount(l) || null,
         assignedAt: projectId && costCodeId ? String(txn.TxnDate) : null,
@@ -270,7 +342,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     const timeValues: (typeof s.timeEntries.$inferInsert)[] = [];
     for (const t of times) {
       const emp = t.EmployeeRef?.value ? empByQbo.get(String(t.EmployeeRef.value)) : undefined;
-      const projectId = t.CustomerRef?.value ? projectIdByQbo.get(String(t.CustomerRef.value)) : undefined;
+      const projectId = resolve(t.CustomerRef, t.ClassRef, t.DepartmentRef) ?? undefined;
       let hours = Number(t.Hours ?? 0) + Number(t.Minutes ?? 0) / 60;
       if (!hours && t.StartTime && t.EndTime) hours = (Date.parse(t.EndTime) - Date.parse(t.StartTime)) / 3_600_000 - Number(t.BreakHours ?? 0) - Number(t.BreakMinutes ?? 0) / 60;
       if (!emp || !projectId || !(hours > 0)) { summary.timeSkipped++; continue; }
@@ -302,7 +374,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     const seenInv = new Set<string>();
     const invValues: (typeof s.qboInvoices.$inferInsert)[] = [];
     for (const [type, list] of [["Invoice", invoices], ["CreditMemo", creditMemos]] as const) for (const inv of list) {
-      const projectId = inv.CustomerRef?.value ? projectIdByQbo.get(String(inv.CustomerRef.value)) : undefined;
+      const projectId = resolve(inv.CustomerRef, undefined, undefined) ?? undefined;
       if (!projectId || (type === "Invoice" && ownInvoices.has(String(inv.Id)))) continue;
       seenInv.add(`${type}|${inv.Id}`);
       const rate = Number(inv.ExchangeRate ?? 1), sign = type === "CreditMemo" ? -1 : 1;

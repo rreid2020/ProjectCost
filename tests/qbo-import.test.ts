@@ -115,7 +115,7 @@ describe("jobs mode, Canadian company", () => {
     const retreat = ps.find((p) => p.qboProjectId === "66")!, ocean = ps.find((p) => p.qboProjectId === "70")!;
     expect(retreat).toMatchObject({ number: "QB-66", name: "Oxon - Retreat", status: "ACTIVE", originalContractCents: 50_000_00 });
     expect(ocean).toMatchObject({ number: "0969", name: "Ocean View Road", status: "COMPLETE" });
-    const cust = await db.query.customers.findFirst({ where: eq(s.customers.id, retreat.customerId) });
+    const cust = await db.query.customers.findFirst({ where: eq(s.customers.id, retreat.customerId!) });
     expect(cust!.name).toBe("Oxon Insurance Agency"); // root customer
     expect(summary).toMatchObject({ customers: 3, projects: 2, newProjects: 2, vendors: 1, employees: 1 });
   });
@@ -209,5 +209,59 @@ describe("tenant isolation", () => {
     await runImport({ companyId: c, query: queryFor({ ...fixtures(), Bill: [], Purchase: [], TimeActivity: [], Invoice: [], CreditMemo: [] }), now: NOW });
     expect({ p: (await rows.projects(other.id)).length, c: (await rows.costs(other.id)).length, t: (await rows.time(other.id)).length }).toEqual(before);
     expect((await db.select().from(s.costTransactions).where(and(eq(s.costTransactions.companyId, c)))).length).toBe(0);
+  });
+});
+
+describe("internal projects linked by class, location or account; journal entries", () => {
+  it("routes lines to linked projects and brings in the right journal lines", async () => {
+    const co = await newCompany("Links");
+    const c = co.id;
+    const [cap] = await db.insert(s.projects).values({ companyId: c, projectType: "CAPITAL", number: "CAP-1", name: "Shop expansion", originalContractCents: 0 }).returning();
+    const [inv] = await db.insert(s.projects).values({ companyId: c, projectType: "INVENTORY", number: "INV-1", name: "Spec home, Lot 12", originalContractCents: 0, unitsPlanned: 1 }).returning();
+    await db.insert(s.projectQboLinks).values([
+      { companyId: c, projectId: cap.id, kind: "class", qboId: "C-SHOP", qboName: "Shop expansion" },
+      { companyId: c, projectId: cap.id, kind: "account", qboId: "300", qboName: "CIP:Shop" },
+      { companyId: c, projectId: inv.id, kind: "department", qboId: "D-LOT12", qboName: "Lot 12" },
+    ]);
+    // account 310 (CIP, general) is flagged as project cost but not linked: unmatched lines there need coding
+    await db.insert(s.glAccounts).values({ companyId: c, qboId: "310", name: "CIP general", fullName: "CIP general", accountType: "Other Current Asset", isProjectCost: true });
+
+    const data = fixtures() as unknown as Record<string, QboRecord[]>;
+    data.Account.push({ Id: "300", AccountType: "Fixed Asset", Name: "CIP:Shop" }, { Id: "310", AccountType: "Other Current Asset", Name: "CIP general" },
+      { Id: "120", AccountType: "Accounts Receivable", Name: "AR" }, { Id: "60", AccountType: "Expense", Name: "Repairs" });
+    data.Class = [{ Id: "C-SHOP", Name: "Shop expansion" }];
+    data.Department = [{ Id: "D-LOT12", Name: "Lot 12" }];
+    const acctLine = (id: string, amount: number, account: string, extra: QboRecord = {}) =>
+      ({ Id: id, Amount: amount, DetailType: "AccountBasedExpenseLineDetail", AccountBasedExpenseLineDetail: { AccountRef: { value: account }, ...extra } });
+    data.Bill.push(
+      { Id: "501", TxnDate: "2026-09-01", VendorRef: { value: "35" }, Line: [acctLine("1", 800, "60", { ClassRef: { value: "C-SHOP", name: "Shop expansion" } })] }, // class -> CAP-1
+      { Id: "502", TxnDate: "2026-09-02", VendorRef: { value: "35" }, DepartmentRef: { value: "D-LOT12", name: "Lot 12" }, Line: [acctLine("1", 1200, "60")] }, // location -> INV-1
+      { Id: "503", TxnDate: "2026-09-03", VendorRef: { value: "35" }, Line: [acctLine("1", 5000, "300")] }, // its own CIP account -> CAP-1
+      { Id: "504", TxnDate: "2026-09-04", VendorRef: { value: "35" }, Line: [acctLine("1", 700, "310")] }, // flagged account, no match -> needs coding
+    );
+    data.JournalEntry = [
+      { Id: "900", TxnDate: "2026-09-05", Line: [
+        { Id: "0", Amount: 300, DetailType: "JournalEntryLineDetail", JournalEntryLineDetail: { PostingType: "Debit", AccountRef: { value: "60" }, ClassRef: { value: "C-SHOP" } } },
+        { Id: "1", Amount: 300, DetailType: "JournalEntryLineDetail", JournalEntryLineDetail: { PostingType: "Credit", AccountRef: { value: "120" }, Entity: { Type: "Customer", EntityRef: { value: "66" } } } },
+      ] },
+      { Id: "901", TxnDate: "2026-09-30", PrivateNote: "[ProjectCost] Reclass project costs · CAP-1", Line: [
+        { Id: "0", Amount: 800, DetailType: "JournalEntryLineDetail", JournalEntryLineDetail: { PostingType: "Debit", AccountRef: { value: "300" } } },
+        { Id: "1", Amount: 800, DetailType: "JournalEntryLineDetail", JournalEntryLineDetail: { PostingType: "Credit", AccountRef: { value: "60" }, ClassRef: { value: "C-SHOP" } } },
+      ] },
+    ];
+
+    await runImport({ companyId: c, query: queryFor(data), now: NOW });
+    const costs = await rows.costs(c);
+    const on = (projectId: string) => costs.filter((x) => x.projectId === projectId).map((x) => `${x.qboTxnType}:${x.qboTxnId}:${x.amountCents}`).sort();
+    expect(on(cap.id)).toEqual(["Bill:501:80000", "Bill:503:500000", "JournalEntry:900:30000"]);
+    expect(on(inv.id)).toEqual(["Bill:502:120000"]);
+    expect(costs.find((x) => x.qboTxnId === "504")).toMatchObject({ projectId: null, qboAccountId: "310" });
+    expect(costs.some((x) => x.qboTxnId === "901")).toBe(false); // ProjectCost's own entry
+    expect(costs.some((x) => x.qboTxnId === "900" && x.qboLineId === "1")).toBe(false); // receivables line with a customer: not a cost
+    expect(await db.select().from(s.glAccounts).where(eq(s.glAccounts.companyId, c))).toHaveLength(6);
+    expect(await db.select().from(s.qboTags).where(eq(s.qboTags.companyId, c))).toHaveLength(2);
+    // re-running keeps the company's project-cost choice on account 310
+    await runImport({ companyId: c, query: queryFor(data), now: NOW });
+    expect((await db.query.glAccounts.findFirst({ where: and(eq(s.glAccounts.companyId, c), eq(s.glAccounts.qboId, "310")) }))!.isProjectCost).toBe(true);
   });
 });

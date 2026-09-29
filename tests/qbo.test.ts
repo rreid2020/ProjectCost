@@ -10,7 +10,8 @@ process.env.QBO_ENVIRONMENT = "sandbox";
 
 import { db, migrateDb, schema as s } from "@/db";
 import { encrypt, decrypt } from "@/lib/crypto";
-import { qboFetch, saveConnection, getConnection } from "@/lib/qbo";
+import { qboFetch, saveConnection, getConnection, setRetryBaseMs } from "@/lib/qbo";
+import { limited } from "@/lib/qbo-import";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", intuit_tid: "tid-1" } });
 const tokens = (n: number) => ({ access_token: `access-${n}`, refresh_token: `refresh-${n}`, expires_in: 3600, x_refresh_token_expires_in: 8_640_000 });
@@ -69,6 +70,24 @@ describe("qboFetch", () => {
     fetchMock.mockResolvedValueOnce(json(401, {})).mockResolvedValueOnce(json(200, tokens(3))).mockResolvedValueOnce(json(200, { ok: true }));
     await expect(qboFetch(companyId, "companyinfo/9130")).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("backs off and retries when QuickBooks throttles (429)", async () => {
+    setRetryBaseMs(1);
+    fetchMock.mockResolvedValueOnce(json(429, {})).mockResolvedValueOnce(json(429, {})).mockResolvedValueOnce(json(200, { ok: true }));
+    await expect(qboFetch(companyId, "companyinfo/9130")).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(json(429, {}));
+    await expect(qboFetch(companyId, "companyinfo/9130")).rejects.toMatchObject({ status: 429 }); // gives up after 5 retries
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("limits how many QuickBooks queries run at once", async () => {
+    let now = 0, peak = 0;
+    const slow = limited(4, async (i: number) => { now++; peak = Math.max(peak, now); await new Promise((r) => setTimeout(r, 5)); now--; return i; });
+    expect(await Promise.all(Array.from({ length: 15 }, (_, i) => slow(i)))).toHaveLength(15);
+    expect(peak).toBe(4);
   });
 
   it("flags a revoked grant as needing reconnect", async () => {

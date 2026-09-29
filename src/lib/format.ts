@@ -14,3 +14,4 @@ export const hours = (x100: number) => (x100 / 100).toFixed(2);
 export const toCents = (input: string | number) => Math.round(parseFloat(String(input).replace(/[$,\s]/g, "")) * 100) || 0;
 export const fmtDate = (iso: string | null | undefined) =>
   iso ? new Date(iso + "T12:00:00").toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }) : "—";
+export const PROJECT_TYPE_LABEL: Record<string, string> = { CONTRACT: "Customer contract", CAPITAL: "Capital project", INVENTORY: "Build for sale" };

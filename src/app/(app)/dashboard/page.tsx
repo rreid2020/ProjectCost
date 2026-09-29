@@ -8,18 +8,22 @@ import { money, pct } from "@/lib/format";
 
 export default async function Dashboard() {
   const { company } = await getTenant();
-  const [projects, un, pendingTime, oh] = await Promise.all([loadPortfolio(company.id), unassignedCosts(company.id), pendingTimeCount(company.id), companyOverhead(company)]);
+  const [projects, un, pendingTime, oh] = await Promise.all([loadPortfolio(company.id, ["ACTIVE"], ["CONTRACT"]), unassignedCosts(company.id), pendingTimeCount(company.id), companyOverhead(company)]);
   const t = (f: (e: (typeof projects)[number]["econ"]) => number) => projects.reduce((a, p) => a + f(p.econ), 0);
   const contract = t((e) => e.revisedContract), eac = t((e) => e.eac);
   const under = -projects.filter((p) => p.econ.overUnder < 0).reduce((a, p) => a + p.econ.overUnder, 0);
   const over = projects.filter((p) => p.econ.overUnder > 0).reduce((a, p) => a + p.econ.overUnder, 0);
   const projProfit = contract - eac;
+  const balanceSheet = await loadPortfolio(company.id, ["ACTIVE", "COMPLETE"], ["CAPITAL", "INVENTORY"]);
+  const bs = balanceSheet.reduce((a, p) => ({
+    cip: a.cip + (p.capital?.cip ?? 0), wip: a.wip + (p.inventory?.wip ?? 0), fg: a.fg + (p.inventory?.fg ?? 0), cogs: a.cogs + (p.inventory?.cogs ?? 0),
+  }), { cip: 0, wip: 0, fg: 0, cogs: 0 });
   const afterOverhead = oh.rate != null ? projects.reduce((a, p) => a + projectOverhead(p.econ, p.labour, oh.rate!, oh.basis).profitAfterOverhead, 0) : null;
   const attention = projects.flatMap((p) => p.flags.map((f) => ({ ...f, p })));
 
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader title="Portfolio" subtitle={`${company.name} · ${projects.length} active projects · cost-to-cost % complete`} />
+      <PageHeader title="Portfolio" subtitle={`${company.name} · ${projects.length} active contracts · cost-to-cost % complete`} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
         <Stat label="Contract value" value={money(contract)} sub="incl. approved change orders" />
@@ -74,6 +78,16 @@ export default async function Dashboard() {
           </div>
         </Card>
       </div>
+      {balanceSheet.length > 0 && (
+        <Card title={`Capital & build-for-sale projects (${balanceSheet.length})`} className="mt-5" action={<Link href="/projects?type=CAPITAL" className="text-xs text-brand-600 hover:underline">View projects →</Link>}>
+          <dl className="grid grid-cols-2 gap-3 p-4 text-sm md:grid-cols-4">
+            <div><dt className="text-xs text-slate-500">Construction in progress</dt><dd className="text-lg font-semibold">{money(bs.cip)}</dd></div>
+            <div><dt className="text-xs text-slate-500">Inventory: work in process</dt><dd className="text-lg font-semibold">{money(bs.wip)}</dd></div>
+            <div><dt className="text-xs text-slate-500">Inventory: finished goods</dt><dd className="text-lg font-semibold">{money(bs.fg)}</dd></div>
+            <div><dt className="text-xs text-slate-500">Cost of goods sold (to date)</dt><dd className="text-lg font-semibold">{money(bs.cogs)}</dd></div>
+          </dl>
+        </Card>
+      )}
     </div>
   );
 }

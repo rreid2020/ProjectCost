@@ -7,14 +7,17 @@ import { Card, PageHeader, M, Stat, ProjectCell } from "@/components/ui";
 import { money, pct, fmtDate } from "@/lib/format";
 import { wipJournal, burdenJournal, isBalanced } from "@/lib/engine";
 import { closeWipPeriod } from "@/app/actions";
+import { ProjectEntries } from "./ProjectEntries";
 
-export default async function Wip() {
+export default async function Wip({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const { company, isAdmin } = await getTenant();
-  const projects = await loadPortfolio(company.id);
+  const projects = await loadPortfolio(company.id, ["ACTIVE"], ["CONTRACT"]); // WIP schedule = customer contracts only
+  const { month: m } = await searchParams;
   const now = new Date();
   const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
   const snaps = await db.select({ periodEnd: s.wipSnapshots.periodEnd, createdAt: s.wipSnapshots.createdAt }).from(s.wipSnapshots).where(eq(s.wipSnapshots.companyId, company.id)).orderBy(desc(s.wipSnapshots.periodEnd));
   const periods = [...new Map(snaps.map((x) => [x.periodEnd, x])).values()];
+  const month = /^\d{4}-\d{2}$/.test(m ?? "") ? m! : periodEnd.slice(0, 7);
 
   const rows = projects.map((p) => ({ p: p.project, e: p.econ }));
   const sum = (f: (e: (typeof rows)[number]["e"]) => number) => rows.reduce((a, r) => a + f(r.e), 0);
@@ -95,6 +98,8 @@ export default async function Wip() {
           <ul className="divide-y divide-slate-100 text-sm">{periods.map((x) => <li key={x.periodEnd} className="px-4 py-2">{fmtDate(x.periodEnd)} <span className="text-xs text-slate-500">saved {new Date(x.createdAt).toLocaleString("en-CA")}</span></li>)}</ul>
         )}
       </Card>
+
+      <ProjectEntries company={company} month={month} />
     </div>
   );
 }

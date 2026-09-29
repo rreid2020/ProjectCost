@@ -154,7 +154,7 @@ export async function closeWipPeriod(form: FormData) {
   const t = await requireAdmin();
   const periodEnd = str(form, "periodEnd");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) return;
-  const projects = await loadPortfolio(t.company.id, ["ACTIVE"]);
+  const projects = await loadPortfolio(t.company.id, ["ACTIVE"], ["CONTRACT"]);
   for (const p of projects) {
     const e = p.econ;
     const row = {
@@ -209,7 +209,14 @@ export async function saveBudgetLine(form: FormData) {
 }
 
 // ---------- Project setup ----------
-const PROJECT_STATUSES = ["BID", "ACTIVE", "COMPLETE"], CONTRACT_TYPES = ["FIXED", "TM", "COST_PLUS"];
+const PROJECT_STATUSES = ["BID", "ACTIVE", "COMPLETE"], CONTRACT_TYPES = ["FIXED", "TM", "COST_PLUS"], PROJECT_TYPES = ["CONTRACT", "CAPITAL", "INVENTORY"];
+
+/** A QuickBooks GL account id, if it belongs to this company's chart of accounts. */
+async function ownAccount(companyId: string, qboId: string) {
+  if (!qboId) return null;
+  const a = await db.query.glAccounts.findFirst({ where: and(eq(s.glAccounts.companyId, companyId), eq(s.glAccounts.qboId, qboId)) });
+  return a?.qboId ?? null;
+}
 const isoDate = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
 const pctBp = (v: string, fallback: number) => { const n = parseFloat(v); return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 100) : fallback; };
 
@@ -219,8 +226,15 @@ export async function updateProject(form: FormData) {
   const number = str(form, "number").slice(0, 40) || p.number;
   const clash = await db.query.projects.findFirst({ where: and(eq(s.projects.companyId, t.company.id), eq(s.projects.number, number)) });
   if (clash && clash.id !== p.id) throw new Error(`Project number ${number} is already used.`);
+  const projectType = PROJECT_TYPES.includes(str(form, "projectType")) ? str(form, "projectType") : p.projectType;
+  const customerId = str(form, "customerId") || null;
+  if (projectType === "CONTRACT" && !customerId) throw new Error("A customer contract needs a customer.");
+  const units = parseInt(str(form, "unitsPlanned"), 10);
   await db.update(s.projects).set({
-    number,
+    number, projectType, customerId, // composite FK rejects another company's customer
+    unitsPlanned: Number.isFinite(units) && units > 0 ? units : p.unitsPlanned,
+    inServiceDate: isoDate(str(form, "inServiceDate")),
+    assetAccountId: (await ownAccount(t.company.id, str(form, "assetAccountId"))) ?? null,
     name: str(form, "name").slice(0, 200) || p.name,
     status: PROJECT_STATUSES.includes(str(form, "status")) ? str(form, "status") : p.status,
     contractType: CONTRACT_TYPES.includes(str(form, "contractType")) ? str(form, "contractType") : p.contractType,
@@ -277,4 +291,95 @@ export async function saveOverheadSettings(form: FormData) {
       .where(and(eq(s.overheadAccounts.companyId, t.company.id), eq(s.overheadAccounts.qboAccountId, qboAccountId)));
   revalidatePath("/", "layout");
   redirect("/overhead?saved=1");
+}
+
+// ---------- New project ----------
+export async function createProject(form: FormData) {
+  const t = await requireWrite();
+  const projectType = PROJECT_TYPES.includes(str(form, "projectType")) ? str(form, "projectType") : "CONTRACT";
+  const number = str(form, "number").slice(0, 40), name = str(form, "name").slice(0, 200);
+  if (!number || !name) throw new Error("Project number and name are required.");
+  const customerId = str(form, "customerId") || null;
+  if (projectType === "CONTRACT" && !customerId) throw new Error("A customer contract needs a customer.");
+  const clash = await db.query.projects.findFirst({ where: and(eq(s.projects.companyId, t.company.id), eq(s.projects.number, number)) });
+  if (clash) throw new Error(`Project number ${number} is already used.`);
+  const units = parseInt(str(form, "unitsPlanned"), 10);
+  const [p] = await db.insert(s.projects).values({
+    companyId: t.company.id, projectType, number, name, customerId,
+    status: "ACTIVE", originalContractCents: projectType === "CONTRACT" ? toCents(str(form, "contract")) : 0,
+    holdbackBp: t.company.defaultHoldbackBp, taxBp: t.company.defaultTaxBp,
+    unitsPlanned: Number.isFinite(units) && units > 0 ? units : 1, startDate: isoDate(str(form, "startDate")),
+  }).returning();
+  revalidatePath("/", "layout");
+  redirect(`/projects/${p.id}?tab=setup`);
+}
+
+// ---------- QuickBooks links (customer / class / location / account -> project) ----------
+const LINK_KINDS = ["customer", "class", "department", "account"];
+
+export async function addProjectLink(form: FormData) {
+  const t = await requireWrite();
+  const p = await ownProject(t.company.id, str(form, "projectId"));
+  const kind = str(form, "kind"), qboId = str(form, "qboId");
+  if (!LINK_KINDS.includes(kind) || !qboId) return;
+  const c = t.company.id;
+  // the QuickBooks entity must be one of this company's
+  const name =
+    kind === "customer" ? (await db.query.customers.findFirst({ where: and(eq(s.customers.companyId, c), eq(s.customers.qboId, qboId)) }))?.name
+    : kind === "account" ? (await db.query.glAccounts.findFirst({ where: and(eq(s.glAccounts.companyId, c), eq(s.glAccounts.qboId, qboId)) }))?.fullName
+    : (await db.query.qboTags.findFirst({ where: and(eq(s.qboTags.companyId, c), eq(s.qboTags.kind, kind), eq(s.qboTags.qboId, qboId)) }))?.name;
+  if (!name) throw new Error("That QuickBooks record wasn't found. Sync from QuickBooks first.");
+  const taken = await db.query.projectQboLinks.findFirst({ where: and(eq(s.projectQboLinks.companyId, c), eq(s.projectQboLinks.kind, kind), eq(s.projectQboLinks.qboId, qboId)) });
+  if (taken && taken.projectId !== p.id) {
+    const other = await db.query.projects.findFirst({ where: and(eq(s.projects.companyId, c), eq(s.projects.id, taken.projectId)) });
+    throw new Error(`${name} already feeds project ${other?.number ?? ""}. Unlink it there first.`);
+  }
+  if (!taken) await db.insert(s.projectQboLinks).values({ companyId: c, projectId: p.id, kind, qboId, qboName: name });
+  revalidatePath(`/projects/${p.id}`);
+}
+
+export async function removeProjectLink(form: FormData) {
+  const t = await requireWrite();
+  await db.delete(s.projectQboLinks).where(and(eq(s.projectQboLinks.id, str(form, "id")), eq(s.projectQboLinks.companyId, t.company.id)));
+  revalidatePath("/", "layout");
+}
+
+// ---------- Units (build for sale) ----------
+export async function addUnitEvent(form: FormData) {
+  const t = await requireWrite();
+  const p = await ownProject(t.company.id, str(form, "projectId"));
+  if (p.projectType !== "INVENTORY") return;
+  const kind = str(form, "kind") === "SOLD" ? "SOLD" : "COMPLETED";
+  const units = parseInt(str(form, "units"), 10), date = isoDate(str(form, "date"));
+  if (!(units > 0) || !date) throw new Error("Enter a date and a whole number of units.");
+  const sale = str(form, "saleAmount");
+  await db.insert(s.projectUnitEvents).values({
+    companyId: t.company.id, projectId: p.id, kind, date, units, saleAmountCents: kind === "SOLD" && sale ? toCents(sale) : null,
+    notes: str(form, "notes").slice(0, 200) || null, createdAt: nowIso(),
+  });
+  revalidatePath(`/projects/${p.id}`);
+}
+
+export async function deleteUnitEvent(form: FormData) {
+  const t = await requireWrite();
+  await db.delete(s.projectUnitEvents).where(and(eq(s.projectUnitEvents.id, str(form, "id")), eq(s.projectUnitEvents.companyId, t.company.id)));
+  revalidatePath("/", "layout");
+}
+
+// ---------- Accounts (entries and project-cost accounts) ----------
+export async function saveAccountSettings(form: FormData) {
+  const t = await requireAdmin();
+  const c = t.company.id;
+  await db.update(s.companies).set({
+    cipAccountId: await ownAccount(c, str(form, "cipAccountId")),
+    wipInventoryAccountId: await ownAccount(c, str(form, "wipInventoryAccountId")),
+    finishedGoodsAccountId: await ownAccount(c, str(form, "finishedGoodsAccountId")),
+    cogsAccountId: await ownAccount(c, str(form, "cogsAccountId")),
+    labourCreditAccountId: await ownAccount(c, str(form, "labourCreditAccountId")),
+  }).where(eq(s.companies.id, c));
+  const listed = form.getAll("account").map(String), checked = new Set(form.getAll("projectCost").map(String));
+  for (const qboId of listed)
+    await db.update(s.glAccounts).set({ isProjectCost: checked.has(qboId) }).where(and(eq(s.glAccounts.companyId, c), eq(s.glAccounts.qboId, qboId)));
+  revalidatePath("/", "layout");
+  redirect("/accounts?saved=1");
 }

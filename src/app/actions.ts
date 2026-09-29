@@ -258,3 +258,23 @@ export async function updateCostCode(form: FormData) {
   await db.update(s.costCodes).set({ costType }).where(and(eq(s.costCodes.id, str(form, "id")), eq(s.costCodes.companyId, t.company.id)));
   revalidatePath("/", "layout");
 }
+
+// ---------- Overhead ----------
+/** Base, rate mode (calculated from QuickBooks or entered), and which P&L accounts make up the pool. */
+export async function saveOverheadSettings(form: FormData) {
+  const t = await requireAdmin();
+  const basis = ["labour_cost", "labour_hours", "direct_cost"].includes(str(form, "basis")) ? str(form, "basis") : t.company.overheadBasis;
+  const mode = str(form, "mode") === "manual" ? "manual" : "calculated";
+  const raw = parseFloat(str(form, "manualRate"));
+  // % of base -> basis points; $ per hour -> cents
+  const manual = Number.isFinite(raw) && raw >= 0 ? Math.round(raw * 100) : null;
+  if (mode === "manual" && manual == null) throw new Error("Enter the overhead rate.");
+  await db.update(s.companies).set({ overheadBasis: basis, overheadRateMode: mode, overheadManualRate: mode === "manual" ? manual : t.company.overheadManualRate })
+    .where(eq(s.companies.id, t.company.id));
+  const listed = form.getAll("account").map(String), included = new Set(form.getAll("include").map(String));
+  for (const qboAccountId of listed)
+    await db.update(s.overheadAccounts).set({ included: included.has(qboAccountId) })
+      .where(and(eq(s.overheadAccounts.companyId, t.company.id), eq(s.overheadAccounts.qboAccountId, qboAccountId)));
+  revalidatePath("/", "layout");
+  redirect("/overhead?saved=1");
+}

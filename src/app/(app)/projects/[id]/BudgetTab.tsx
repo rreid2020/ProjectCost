@@ -2,11 +2,14 @@ import Link from "next/link";
 import { Card, M, Progress, Badge } from "@/components/ui";
 import { money } from "@/lib/format";
 import { UNCODED, type LoadedProject } from "@/lib/queries";
+import type { OverheadResult } from "@/lib/engine";
 import { saveBudgetLine, saveForecast } from "@/app/actions";
 
 const typeLabel: Record<string, string> = { LABOUR: "Labour", MATERIAL: "Material", SUB: "Subcontract", EQUIPMENT: "Equipment", OTHER: "Other" };
 
-export function BudgetTab({ data }: { data: LoadedProject }) {
+type OverheadView = OverheadResult & { rateLabel: string; basis: string };
+
+export function BudgetTab({ data, overhead }: { data: LoadedProject; overhead: OverheadView | null }) {
   const { econ: e, project: p } = data;
   const byType = Object.entries(
     e.rows.reduce<Record<string, { budget: number; actual: number; eac: number }>>((acc, r) => {
@@ -94,7 +97,7 @@ export function BudgetTab({ data }: { data: LoadedProject }) {
         </div>
       </Card>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid gap-5 md:grid-cols-3">
         <Card title="By cost type">
           <table className="grid-table">
             <thead><tr><th>Type</th><th className="num">Revised budget</th><th className="num">Actual</th><th className="num">EAC</th><th className="num">Variance</th></tr></thead>
@@ -111,6 +114,19 @@ export function BudgetTab({ data }: { data: LoadedProject }) {
             <dt className="text-slate-500">Burdened labour cost</dt><dd className="num font-medium">{money(data.labour.wages + data.labour.burden)}</dd>
             <dt className="text-slate-500">Hours pending approval</dt><dd className="num">{(data.labour.pendingHours / 100).toLocaleString("en-CA")}</dd>
           </dl>
+        </Card>
+        <Card title="Overhead" action={<Link href="/overhead" className="text-xs text-brand-600 hover:underline">How the rate is set →</Link>}>
+          {!overhead ? <p className="px-4 py-3 text-sm text-slate-500">No overhead rate yet. <Link href="/overhead" className="underline">Set it up</Link>.</p> : (
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 px-4 py-3 text-sm">
+              <dt className="text-slate-500">Rate</dt><dd className="text-right">{overhead.rateLabel}</dd>
+              <dt className="text-slate-500">Base to date</dt><dd className="num">{overhead.basis === "labour_hours" ? `${(overhead.baseToDate / 100).toLocaleString("en-CA")} h` : money(overhead.baseToDate)}</dd>
+              <dt className="text-slate-500">Overhead to date</dt><dd className="num">{money(overhead.toDate)}</dd>
+              <dt className="text-slate-500">Overhead at completion</dt><dd className="num">{money(overhead.atCompletion)}</dd>
+              <dt className="text-slate-500">Projected gross profit</dt><dd className="num">{money(e.projectedProfit)}</dd>
+              <dt className="font-medium text-slate-700">Profit after overhead</dt><dd className={`num font-medium ${overhead.profitAfterOverhead < 0 ? "text-red-700" : ""}`}>{money(overhead.profitAfterOverhead)}</dd>
+            </dl>
+          )}
+          <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Management view only. Not in job cost, % complete or WIP.</p>
         </Card>
       </div>
     </div>

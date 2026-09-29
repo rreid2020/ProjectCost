@@ -10,6 +10,8 @@ import { BillingTab } from "./BillingTab";
 import { CostsTab, TimeTab } from "./LedgerTabs";
 import { SetupTab } from "./SetupTab";
 import { qboEnvironment } from "@/lib/qbo";
+import { companyOverhead, describeRate } from "@/lib/overhead";
+import { projectOverhead } from "@/lib/engine";
 
 const TABS = [
   ["budget", "Budget vs. actual"],
@@ -27,6 +29,8 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
   const data = await loadProject(company.id, id);
   const qbo = { environment: qboEnvironment(), realmId: company.qboRealmId };
   if (!data) notFound();
+  const oh = await companyOverhead(company);
+  const po = oh.rate != null ? projectOverhead(data.econ, data.labour, oh.rate, oh.basis) : null;
   const { project: p, econ: e, flags } = data;
 
   return (
@@ -38,7 +42,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         actions={<div className="flex flex-wrap gap-1.5">{flags.map((f, i) => <Badge key={i} tone={f.level}>{f.text}</Badge>)}</div>}
       />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
         <Stat label="Revised contract" value={money(e.revisedContract)} sub={data.pendingCoRevenue ? `+${money(data.pendingCoRevenue)} pending COs` : `Original ${money(p.originalContractCents)}`} />
         <Stat label="Revised budget" value={money(e.revisedBudget)} sub={`Budget margin ${pct(e.budgetMarginBp)}`} />
         <Stat label="Cost to date" value={money(e.costToDate)} sub={`${pct(e.pctCompleteBp)} complete`} />
@@ -46,6 +50,9 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         <Stat label="Projected profit" value={money(e.projectedProfit)} sub={`${pct(e.projectedMarginBp)} · fade ${(e.fadeBp / 100).toFixed(1)} pts`} tone={e.projectedProfit < 0 ? "bad" : e.fadeBp < -100 ? "warn" : "good"} />
         <Stat label="Earned / billed" value={money(e.earnedRevenue)} sub={`Billed ${money(e.billedToDate)}`} />
         <Stat label={e.overUnder >= 0 ? "Overbilled" : "Underbilled"} value={money(Math.abs(e.overUnder))} sub={`Holdback rec. ${money(e.holdbackReceivable)}`} tone={e.overUnder < 0 ? "warn" : undefined} />
+        <Stat label="Profit after overhead" value={po ? money(po.profitAfterOverhead) : "—"}
+          sub={po ? <Link href="/overhead" className="hover:underline">{pct(po.marginAfterBp)} · overhead {money(po.atCompletion)}</Link> : <Link href="/overhead" className="underline">Set up overhead</Link>}
+          tone={po ? (po.profitAfterOverhead < 0 ? "bad" : "good") : undefined} />
       </div>
 
       <div className="mt-6 flex gap-1 border-b border-slate-200">
@@ -58,7 +65,7 @@ export default async function ProjectPage({ params, searchParams }: { params: Pr
         ))}
       </div>
       <div className="mt-4">
-        {tab === "budget" && <BudgetTab data={data} />}
+        {tab === "budget" && <BudgetTab data={data} overhead={po && oh.rate != null ? { ...po, rateLabel: describeRate(oh.rate, oh.basis), basis: oh.basis } : null} />}
         {tab === "changes" && <ChangeOrdersTab data={data} />}
         {tab === "billing" && <BillingTab data={data} ctx={qbo} />}
         {tab === "costs" && <CostsTab data={data} ctx={qbo} code={code} region={company.region} />}

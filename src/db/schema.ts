@@ -26,6 +26,10 @@ export const companies = pgTable("company", {
   qboCompanyName: text("qbo_company_name"), // CompanyInfo.CompanyName at connect time
   qboProjectMode: text("qbo_project_mode"), // what a project is in QuickBooks: "jobs" (sub-customers/Projects) | "customers"
   qboLastImportAt: text("qbo_last_import_at"),
+  // overhead (management view only: never changes job cost, WIP or QuickBooks)
+  overheadBasis: text("overhead_basis").notNull().default("labour_cost"), // labour_cost | labour_hours | direct_cost
+  overheadRateMode: text("overhead_rate_mode").notNull().default("calculated"), // calculated | manual
+  overheadManualRate: integer("overhead_manual_rate"), // bp of base (labour_cost, direct_cost) or cents per hour (labour_hours)
   defaultHoldbackBp: integer("default_holdback_bp").notNull().default(1000),
   defaultTaxBp: integer("default_tax_bp").notNull().default(1300),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
@@ -228,6 +232,7 @@ export const costTransactions = pgTable(
     qboCurrency: text("qbo_currency"),
     qboLineAmountCents: cents("qbo_line_amount_cents"),
     qboExchangeRate: text("qbo_exchange_rate"),
+    qboAccountId: text("qbo_account_id"), // GL account the line posted to (for netting job costs out of the overhead pool)
     assignedAt: text("assigned_at"),
     pendingPush: boolean("pending_push").notNull().default(false),
   },
@@ -366,6 +371,32 @@ export const qboInvoices = pgTable(
     exchangeRate: text("exchange_rate"),
   },
   (t) => [uniqueIndex("qbo_invoice_company_txn").on(t.companyId, t.qboTxnType, t.qboTxnId), toProject("qbo_invoice", t.companyId, t.projectId)],
+);
+
+// Overhead pool: expense accounts from QuickBooks' Profit and Loss, and their monthly amounts.
+export const overheadAccounts = pgTable(
+  "overhead_account",
+  {
+    id: id(),
+    companyId: companyId(),
+    qboAccountId: text("qbo_account_id").notNull(),
+    name: text("name").notNull(),
+    section: text("section").notNull(), // Expenses | OtherExpenses (as in the P&L)
+    included: boolean("included"), // null = default (Expenses in, OtherExpenses out)
+  },
+  (t) => [uniqueIndex("overhead_account_company_qbo").on(t.companyId, t.qboAccountId)],
+);
+
+export const overheadMonths = pgTable(
+  "overhead_month",
+  {
+    id: id(),
+    companyId: companyId(),
+    qboAccountId: text("qbo_account_id").notNull(),
+    month: text("month").notNull(), // YYYY-MM
+    amountCents: cents("amount_cents").notNull(),
+  },
+  (t) => [uniqueIndex("overhead_month_company_account_month").on(t.companyId, t.qboAccountId, t.month)],
 );
 
 // One row per QuickBooks import run: progress, outcome and counts for the settings page.

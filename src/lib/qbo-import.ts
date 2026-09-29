@@ -243,6 +243,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
         vendorId: vendorRef ? vendorIdByQbo.get(String(vendorRef)) ?? null : null,
         projectId, costCodeId, qboCustomerName: detail.CustomerRef?.name ? String(detail.CustomerRef.name) : null,
         qboCurrency: txn.CurrencyRef?.value ? String(txn.CurrencyRef.value) : null, qboLineAmountCents: sign * cents(net), qboExchangeRate: String(rate),
+        qboAccountId: lineAccount(l) || null,
         assignedAt: projectId && costCodeId ? String(txn.TxnDate) : null,
       });
       if (!projectId || !costCodeId) summary.needsCoding++;
@@ -255,6 +256,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
           date: sql`excluded.date`, source: sql`excluded.source`, docNumber: sql`excluded.doc_number`, description: sql`excluded.description`,
           amountCents: sql`excluded.amount_cents`, taxCents: sql`excluded.tax_cents`, vendorId: sql`excluded.vendor_id`, qboCustomerName: sql`excluded.qbo_customer_name`,
           qboCurrency: sql`excluded.qbo_currency`, qboLineAmountCents: sql`excluded.qbo_line_amount_cents`, qboExchangeRate: sql`excluded.qbo_exchange_rate`,
+          qboAccountId: sql`excluded.qbo_account_id`,
           // QuickBooks wins when it has a value; otherwise keep what was coded in ProjectCost
           projectId: sql`coalesce(excluded.project_id, ${ct.projectId})`,
           costCodeId: sql`coalesce(excluded.cost_code_id, ${ct.costCodeId})`,

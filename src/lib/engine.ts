@@ -226,3 +226,47 @@ export function healthFlags(r: ProjectResult) {
   if (overrun.length) flags.push({ level: "amber", text: `${overrun.length} cost code${overrun.length > 1 ? "s" : ""} over budget` });
   return flags;
 }
+
+// ---------- Overhead (management view: profit after overhead; never part of job cost or WIP) ----------
+export type OverheadBasis = "labour_cost" | "labour_hours" | "direct_cost";
+
+/** Rate from a pool and a base over the same period: basis points of base, or cents per hour for labour_hours. Base hours are x100. */
+export function overheadRate(poolCents: number, base: number, basis: OverheadBasis): number | null {
+  if (base <= 0) return null;
+  return basis === "labour_hours" ? round((poolCents * 100) / base) : round((poolCents / base) * 10_000);
+}
+
+export function applyOverhead(base: number, rate: number, basis: OverheadBasis) {
+  return basis === "labour_hours" ? round((base * rate) / 100) : bp(base, rate);
+}
+
+export interface OverheadResult {
+  baseToDate: number;
+  baseAtCompletion: number;
+  toDate: number;
+  atCompletion: number;
+  profitAfterOverhead: number; // projected profit − overhead at completion
+  marginAfterBp: number;
+  grossProfitToDateAfter: number;
+}
+
+/**
+ * Overhead for one project. At completion, labour is taken from the LABOUR cost-type rows' EAC;
+ * hours at completion scale hours to date by labour EAC / labour to date.
+ */
+export function projectOverhead(e: ProjectResult, labour: { wages: number; burden: number; approvedHours: number }, rate: number, basis: OverheadBasis): OverheadResult {
+  const labourToDate = labour.wages + labour.burden;
+  const labourEac = Math.max(e.rows.filter((r) => r.costType === "LABOUR").reduce((a, r) => a + r.eac, 0), labourToDate);
+  const [baseToDate, baseAtCompletion] =
+    basis === "labour_cost" ? [labourToDate, labourEac]
+    : basis === "labour_hours" ? [labour.approvedHours, labourToDate > 0 ? round((labour.approvedHours * labourEac) / labourToDate) : labour.approvedHours]
+    : [e.costToDate, e.eac];
+  const toDate = applyOverhead(baseToDate, rate, basis);
+  const atCompletion = applyOverhead(baseAtCompletion, rate, basis);
+  const profitAfterOverhead = e.projectedProfit - atCompletion;
+  return {
+    baseToDate, baseAtCompletion, toDate, atCompletion, profitAfterOverhead,
+    marginAfterBp: e.revisedContract ? Math.round((profitAfterOverhead / e.revisedContract) * 10_000) : 0,
+    grossProfitToDateAfter: e.grossProfitToDate - toDate,
+  };
+}

@@ -6,6 +6,7 @@ import { db, schema as s } from "@/db";
 import { requireAdmin } from "@/lib/tenant";
 import { QboError, fetchCompanyInfo, qboFetch, revokeConnection } from "@/lib/qbo";
 import { importWindowStart, pagedQuery, runImport } from "@/lib/qbo-import";
+import { importOverheadPool } from "@/lib/overhead";
 
 const log = (companyId: string, userId: string, status: string, message: string, qboId: string | null = null, entity = "Connection") =>
   db.insert(s.syncLogs).values({ companyId, userId, entity, qboId, direction: "PULL", status, message, createdAt: new Date().toISOString() });
@@ -59,6 +60,12 @@ export async function importFromQbo(form: FormData) {
     const query = pagedQuery((q) => qboFetch(t.company.id, `query?query=${encodeURIComponent(q)}`));
     const summary = await runImport({ companyId: t.company.id, query });
     await db.update(s.qboImportRuns).set({ status: "OK", finishedAt: new Date().toISOString(), summary: JSON.stringify(summary) }).where(eq(s.qboImportRuns.id, run.id));
+    // Overhead pool (P&L). A failure here doesn't undo the import.
+    try {
+      await importOverheadPool({ companyId: t.company.id, report: (path) => qboFetch(t.company.id, path) });
+    } catch (e) {
+      await log(t.company.id, t.userId, "ERROR", `Overhead pool (Profit and Loss) not refreshed: ${e instanceof Error ? e.message : String(e)}`, t.company.qboRealmId, "Import");
+    }
     await log(t.company.id, t.userId, "OK", `Imported: ${summary.projects} projects (${summary.newProjects} new), ${summary.costLines} cost lines (${summary.needsCoding} to code), ${summary.timeEntries} time entries, ${summary.invoices} invoices`, t.company.qboRealmId, "Import");
   } catch (e) {
     const tid = e instanceof QboError && e.intuitTid ? ` (intuit_tid ${e.intuitTid})` : "";

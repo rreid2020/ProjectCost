@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { loadPortfolio, unassignedCosts, pendingTimeCount } from "@/lib/queries";
+import { companyOverhead } from "@/lib/overhead";
+import { projectOverhead } from "@/lib/engine";
 import { getTenant } from "@/lib/tenant";
 import { Card, Stat, Badge, Progress, M, PageHeader, ProjectCell } from "@/components/ui";
 import { money, pct } from "@/lib/format";
 
 export default async function Dashboard() {
   const { company } = await getTenant();
-  const [projects, un, pendingTime] = await Promise.all([loadPortfolio(company.id), unassignedCosts(company.id), pendingTimeCount(company.id)]);
+  const [projects, un, pendingTime, oh] = await Promise.all([loadPortfolio(company.id), unassignedCosts(company.id), pendingTimeCount(company.id), companyOverhead(company)]);
   const t = (f: (e: (typeof projects)[number]["econ"]) => number) => projects.reduce((a, p) => a + f(p.econ), 0);
   const contract = t((e) => e.revisedContract), eac = t((e) => e.eac);
   const under = -projects.filter((p) => p.econ.overUnder < 0).reduce((a, p) => a + p.econ.overUnder, 0);
   const over = projects.filter((p) => p.econ.overUnder > 0).reduce((a, p) => a + p.econ.overUnder, 0);
   const projProfit = contract - eac;
+  const afterOverhead = oh.rate != null ? projects.reduce((a, p) => a + projectOverhead(p.econ, p.labour, oh.rate!, oh.basis).profitAfterOverhead, 0) : null;
   const attention = projects.flatMap((p) => p.flags.map((f) => ({ ...f, p })));
 
   return (
@@ -22,7 +25,7 @@ export default async function Dashboard() {
         <Stat label="Contract value" value={money(contract)} sub="incl. approved change orders" />
         <Stat label="Cost to date" value={money(t((e) => e.costToDate))} sub={`EAC ${money(eac)}`} />
         <Stat label="Earned revenue" value={money(t((e) => e.earnedRevenue))} sub={`Billed ${money(t((e) => e.billedToDate))}`} />
-        <Stat label="Projected gross profit" value={money(projProfit)} sub={contract ? pct(Math.round((projProfit / contract) * 10000)) : "—"} tone={projProfit < 0 ? "bad" : "good"} />
+        <Stat label="Projected gross profit" value={money(projProfit)} sub={`${contract ? pct(Math.round((projProfit / contract) * 10000)) : "—"}${afterOverhead != null ? ` · after overhead ${money(afterOverhead)}` : ""}`} tone={projProfit < 0 ? "bad" : "good"} />
         <Stat label="Underbilled (asset)" value={money(under)} sub={`Overbilled ${money(over)}`} tone={under > over ? "warn" : undefined} />
         <Stat label="Backlog" value={money(t((e) => e.backlog))} sub={`Holdback rec. ${money(t((e) => e.holdbackReceivable))}`} />
       </div>

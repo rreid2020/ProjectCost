@@ -496,6 +496,21 @@ export const qboImportRuns = pgTable(
   (t) => [index("qbo_import_run_company_started").on(t.companyId, t.startedAt)],
 );
 
+// Guided mode: steps a company marked done or skipped. period = "setup" for one-time steps, "YYYY-MM" for monthly ones.
+export const guideMarks = pgTable(
+  "guide_mark",
+  {
+    id: id(),
+    companyId: companyId(),
+    stepKey: text("step_key").notNull(),
+    period: text("period").notNull(),
+    status: text("status").notNull(), // DONE | SKIPPED
+    userId: text("user_id").notNull(),
+    at: text("at").notNull(),
+  },
+  (t) => [uniqueIndex("guide_mark_company_step_period").on(t.companyId, t.stepKey, t.period)],
+);
+
 // Stripe webhook idempotency: each event id is processed once.
 export const stripeEvents = pgTable("stripe_event", {
   id: text("id").primaryKey(),

@@ -7,6 +7,7 @@ import { db, schema as s } from "@/db";
 import { loadDemoData } from "@/db/demo";
 import { TRIAL_DAYS } from "@/lib/plans";
 import { companyForOrg, requireAdmin } from "@/lib/tenant";
+import { PROVINCES, STATES } from "@/components/CompanyFields";
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 const bp = (f: FormData, k: string, fallback: number) => {
@@ -16,10 +17,13 @@ const bp = (f: FormData, k: string, fallback: number) => {
 
 function companyFields(form: FormData) {
   const month = parseInt(str(form, "fiscalYearEndMonth"), 10);
+  const code = str(form, "province").toUpperCase();
+  const inCanada = PROVINCES.some(([c]) => c === code), inUS = STATES.some(([c]) => c === code);
   return {
     name: str(form, "name").slice(0, 120) || "My company",
-    region: str(form, "region") === "US" ? "US" : "CA",
-    province: str(form, "province").toUpperCase().slice(0, 3) || null,
+    // the province/state decides the country, so tax treatment can't contradict it
+    region: inUS ? "US" : inCanada ? "CA" : str(form, "region") === "US" ? "US" : "CA",
+    province: inCanada || inUS ? code : null,
     fiscalYearEndMonth: month >= 1 && month <= 12 ? month : 12,
     defaultHoldbackBp: bp(form, "holdbackPct", 1000),
     defaultTaxBp: bp(form, "taxPct", 1300),

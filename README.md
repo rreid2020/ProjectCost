@@ -97,6 +97,17 @@ scripts/                 migrate + local reset
 drizzle/                 SQL migrations (regenerate with `npm run db:generate` after schema changes)
 ```
 
+## Project types
+
+- **Customer contract**: revenue, change orders, progress billing with holdback, cost-to-cost % complete, the WIP schedule and over/under billings.
+- **Capital project**: no customer or revenue. Cost accumulates in construction in progress and is capitalized to a fixed-asset account on the in-service date.
+- **Build for sale**: any number of units. Completing units moves their share of work in process to finished goods; selling moves finished goods to COGS at average cost.
+
+Projects find their QuickBooks costs through links: customer, class, location or GL account (matched in that order). The **Accounts** page sets which
+GL accounts count as project cost (COGS by default) and where capital/inventory entries post. **WIP & month-end** drafts the month's entries (reclass
+incl. burdened labour, capitalization, units completed, units sold) with a `[ProjectCost]` memo so the next import doesn't count them twice.
+Only customer contracts appear on the WIP schedule.
+
 ## QuickBooks Online connection
 
 Each company connects its own QuickBooks file from **QuickBooks & settings → Connect to QuickBooks** (admins only).

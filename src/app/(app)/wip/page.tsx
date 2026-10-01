@@ -88,7 +88,7 @@ export default async function Wip({ searchParams }: { searchParams: Promise<{ mo
                 <tr key={i}><td className={l.credit ? "pl-8" : ""}>{l.account}</td><td className="num">{l.debit ? money(l.debit, { cents: true }) : ""}</td><td className="num">{l.credit ? money(l.credit, { cents: true }) : ""}</td></tr>
               ))}</tbody>
             </table>
-            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Posts to QuickBooks as a JournalEntry once connected. Account mapping lives in settings.</p>
+            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Book this in QuickBooks as a journal entry (+ New → Journal entry). ProjectCost doesn&apos;t post it for you yet.</p>
           </Card>
         ))}
       </div>

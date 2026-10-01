@@ -21,9 +21,12 @@ export default async function Time() {
 
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader title="Timesheets" subtitle="Approved time becomes burdened job cost and is pushed to QuickBooks as TimeActivity." />
+      <PageHeader title="Timesheets" subtitle="Approved time becomes burdened job cost in ProjectCost." />
       <div className="grid gap-5 lg:grid-cols-3">
         <Card title="Log time">
+          <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+            Time entered in QuickBooks arrives approved when you sync. Use this form for time not in QuickBooks. Employees come from QuickBooks: add them there, then sync.
+          </p>
           <form action={addTimeEntry} className="grid gap-3 p-4 text-sm">
             <label className="grid gap-1"><span className="text-xs text-slate-600">Employee</span>
               <select name="employeeId" required className="input">{emps.map((e) => <option key={e.id} value={e.id}>{e.name} — {e.trade}</option>)}</select></label>

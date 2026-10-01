@@ -265,3 +265,22 @@ describe("internal projects linked by class, location or account; journal entrie
     expect((await db.query.glAccounts.findFirst({ where: and(eq(s.glAccounts.companyId, c), eq(s.glAccounts.qboId, "310")) }))!.isProjectCost).toBe(true);
   });
 });
+
+describe("progress bills also invoiced in QuickBooks", () => {
+  it("counts the bill once when it is linked to the synced invoice's number", async () => {
+    const c = (await newCompany("DoubleBill")).id;
+    await runImport({ companyId: c, query: queryFor(fixtures()), now: NOW });
+    const retreat = (await rows.projects(c)).find((p) => p.qboProjectId === "66")!;
+    const [sov] = await db.insert(s.sovLines).values({ companyId: c, projectId: retreat.id, lineNo: 1, description: "Retreat", scheduledValueCents: 50_000_00 }).returning();
+    const [bill] = await db.insert(s.progressBills).values({ companyId: c, projectId: retreat.id, number: 1, periodEnd: "2026-06-30", status: "POSTED" }).returning();
+    await db.insert(s.progressBillLines).values({ companyId: c, progressBillId: bill.id, sovLineId: sov.id, thisPeriodCents: 10_000_00 });
+
+    // not linked: the bill and QuickBooks invoice 1037 (same $10,000) both count, less the $100 credit memo
+    expect((await loadProject(c, retreat.id))!.econ.billedToDate).toBe(10_000_00 + 10_000_00 - 100_00);
+    // linked by the QuickBooks invoice number: counted once
+    await db.update(s.progressBills).set({ qboInvoiceId: "1037" }).where(eq(s.progressBills.id, bill.id));
+    const linked = (await loadProject(c, retreat.id))!;
+    expect(linked.econ.billedToDate).toBe(10_000_00 - 100_00);
+    expect(linked.qboInvoices.find((i) => i.docNumber === "1037")!.matchedBill).toBe(1);
+  });
+});

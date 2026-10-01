@@ -2,7 +2,7 @@ import { Card, M, StatusBadge, Empty } from "@/components/ui";
 import { fmtDate, money, pct } from "@/lib/format";
 import { progressBill } from "@/lib/engine";
 import type { LoadedProject } from "@/lib/queries";
-import { postProgressBill, deleteProgressBill } from "@/app/actions";
+import { postProgressBill, deleteProgressBill, linkProgressBillInvoice } from "@/app/actions";
 import { NewBillForm } from "./NewBillForm";
 import { QboRef } from "./LedgerTabs";
 import type { QboLinkContext } from "@/lib/qbo-links";
@@ -54,7 +54,10 @@ export function BillingTab({ data, ctx }: { data: LoadedProject; ctx: QboLinkCon
                 <td><QboRef ctx={ctx} type={i.qboTxnType} id={i.qboTxnId} doc={i.docNumber} /></td>
                 <td className="num">{i.totalCents != null ? <>{i.currency && i.exchangeRate !== "1" ? `${i.currency} ` : ""}<M v={i.totalCents} cents /></> : "—"}</td>
                 <td className="num text-slate-500">{i.taxCents != null ? <M v={-i.taxCents} cents /> : "—"}</td>
-                <td className="num font-medium"><M v={i.amountCents} cents />{i.exchangeRate && i.exchangeRate !== "1" && <span className="block text-[0.68rem] text-slate-400">× {i.exchangeRate}</span>}</td>
+                <td className="num font-medium">
+                  {i.matchedBill != null ? <span className="text-xs font-normal text-slate-500" title="Already counted as the progress bill posted in ProjectCost">Counted as PB-{i.matchedBill}</span> : <M v={i.amountCents} cents />}
+                  {i.matchedBill == null && i.exchangeRate && i.exchangeRate !== "1" && <span className="block text-[0.68rem] text-slate-400">× {i.exchangeRate}</span>}
+                </td>
               </tr>
             ))}</tbody>
             <tfoot><tr><td colSpan={4}>Billed in QuickBooks</td><td className="num"><M v={data.billedInQbo} cents /></td></tr></tfoot>
@@ -65,7 +68,7 @@ export function BillingTab({ data, ctx }: { data: LoadedProject; ctx: QboLinkCon
       <Card title="Billing history">
         {bills.length === 0 ? <Empty>No progress bills yet.</Empty> : (
           <table className="grid-table">
-            <thead><tr><th>#</th><th>Period end</th><th>Status</th><th>QBO invoice</th><th className="num">Gross this period</th><th className="num">Holdback</th><th className="num">HST</th><th className="num">Net due</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Period end</th><th>Status</th><th>QuickBooks invoice #</th><th className="num">Gross this period</th><th className="num">Holdback</th><th className="num">HST</th><th className="num">Net due</th><th></th></tr></thead>
             <tbody>{[...bills].reverse().map((b) => {
               const s = billSummary(b);
               return (
@@ -73,7 +76,16 @@ export function BillingTab({ data, ctx }: { data: LoadedProject; ctx: QboLinkCon
                   <td className="font-mono text-xs">PB-{b.number}</td>
                   <td className="text-xs">{fmtDate(b.periodEnd)}</td>
                   <td><StatusBadge status={b.status} /></td>
-                  <td className="font-mono text-xs text-slate-500">{b.qboInvoiceId ?? (b.status === "POSTED" ? "queued" : "—")}</td>
+                  <td className="font-mono text-xs text-slate-500">
+                    {b.status !== "POSTED" ? "—" : (
+                      <form action={linkProgressBillInvoice} className="flex items-center gap-1" title="The invoice number in QuickBooks, so the synced invoice isn't counted twice">
+                        <input type="hidden" name="id" value={b.id} />
+                        <input name="qboInvoice" defaultValue={b.qboInvoiceId ?? ""} placeholder="Invoice #" aria-label={`QuickBooks invoice number for PB-${b.number}`}
+                          className={`input w-24 py-0.5 text-xs ${b.qboInvoiceId ? "" : "border-amber-300 bg-amber-50"}`} />
+                        <button className="btn btn-secondary btn-sm">✓</button>
+                      </form>
+                    )}
+                  </td>
                   <td className="num"><M v={s.gross} cents /></td>
                   <td className="num"><M v={s.holdback} cents /></td>
                   <td className="num"><M v={s.tax} cents /></td>
@@ -81,7 +93,7 @@ export function BillingTab({ data, ctx }: { data: LoadedProject; ctx: QboLinkCon
                   <td className="text-right whitespace-nowrap">
                     {b.status === "DRAFT" && (
                       <span className="inline-flex gap-1">
-                        <form action={postProgressBill}><input type="hidden" name="id" value={b.id} /><button className="btn btn-sm">Post → QBO invoice</button></form>
+                        <form action={postProgressBill}><input type="hidden" name="id" value={b.id} /><button className="btn btn-sm" title="Records the bill in ProjectCost. Create the invoice in QuickBooks, then enter its number here.">Post</button></form>
                         <form action={deleteProgressBill}><input type="hidden" name="id" value={b.id} /><button className="btn btn-secondary btn-sm">Delete</button></form>
                       </span>
                     )}

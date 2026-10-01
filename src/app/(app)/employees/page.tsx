@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { and, asc, count, eq } from "drizzle-orm";
 import { db, schema as s } from "@/db";
 import { getTenant } from "@/lib/tenant";
@@ -15,9 +16,20 @@ export default async function Employees() {
   const unrated = new Map(noRate.map((r) => [r.employeeId, r.n]));
   return (
     <div className="mx-auto max-w-6xl">
-      <PageHeader title="Employees" subtitle="Labour job cost = approved hours × pay rate × (1 + burden). QuickBooks doesn't carry pay rates for job costing, so set them here." />
+      <PageHeader title="Employees" subtitle="Labour job cost = approved hours × pay rate × (1 + burden)."
+        actions={<Link href="/settings" className="btn btn-secondary">Sync from QuickBooks</Link>} />
+      <p className="mb-4 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+        <span className="font-medium">Where employees come from:</span> add them in QuickBooks (<span className="font-medium">Payroll → Employees → Add employee</span>), then
+        click <span className="font-medium">Sync now</span>. Their pay rate, burden and trade are set here, because QuickBooks doesn&apos;t carry them for job costing.
+        Subcontractors aren&apos;t employees: their cost arrives on their bills.
+      </p>
       <Card>
-        {emps.length === 0 ? <Empty>No employees yet. They come in with the QuickBooks import.</Empty> : (
+        {emps.length === 0 ? (
+          <Empty>
+            No employees yet. Add them in QuickBooks, then <Link href="/settings" className="underline">Sync now</Link>.
+            <span className="mt-1 block text-xs">Display name and billing rate are enough in QuickBooks; payroll setup isn&apos;t needed.</span>
+          </Empty>
+        ) : (
           <div className="overflow-x-auto">
             <table className="grid-table">
               <thead><tr><th>Employee</th><th>Trade / role</th><th className="num">Pay rate /h</th><th className="num">Burden %</th><th className="num">Bill rate /h</th><th></th></tr></thead>

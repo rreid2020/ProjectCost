@@ -19,7 +19,7 @@ export default async function Costs() {
   ]);
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader title="Unassigned costs" subtitle="Job costs from QuickBooks that still need a project or a cost code. Code them here; once write-back is on, the project and item are written back to the QuickBooks line." />
+      <PageHeader title="Unassigned costs" subtitle="Job costs from QuickBooks that still need a project or a cost code. Code them here. Coding is kept in ProjectCost and survives every sync; QuickBooks isn&apos;t changed." />
       <Card title={`${items.length} waiting`}>
         {items.length === 0 ? <Empty>Everything is coded. Nice.</Empty> : (
           <table className="grid-table">
@@ -54,11 +54,11 @@ export default async function Costs() {
       </Card>
 
       {recent.length > 0 && (
-        <Card title="Recently coded — queued to write back to QuickBooks" className="mt-5">
+        <Card title="Recently coded in ProjectCost" className="mt-5">
           <table className="grid-table">
-            <thead><tr><th>Vendor</th><th>Description</th><th>Project</th><th>Cost code</th><th className="num">Amount</th><th>Sync</th></tr></thead>
+            <thead><tr><th>Vendor</th><th>Description</th><th>Project</th><th>Cost code</th><th className="num">Amount</th><th>Status</th></tr></thead>
             <tbody>{recent.map((c) => (
-              <tr key={c.id}><td>{c.vendor?.name}</td><td className="text-slate-600">{c.description}</td><td>{c.project?.number}</td><td className="font-mono text-xs">{c.costCode?.code}</td><td className="num"><M v={c.amountCents} cents /></td><td><Badge tone="amber">Queued</Badge></td></tr>
+              <tr key={c.id}><td>{c.vendor?.name}</td><td className="text-slate-600">{c.description}</td><td>{c.project?.number}</td><td className="font-mono text-xs">{c.costCode?.code}</td><td className="num"><M v={c.amountCents} cents /></td><td><Badge tone="green">Coded</Badge></td></tr>
             ))}</tbody>
           </table>
         </Card>

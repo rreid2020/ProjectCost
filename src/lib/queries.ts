@@ -75,7 +75,10 @@ export async function loadProject(companyId: string, projectId: string) {
   for (const f of fc) ensure(f.costCodeId).etcOverride = f.etcCents;
 
   const postedBills = bills.filter((b) => b.status === "POSTED");
-  const billedInQbo = qboInvoices.reduce((a, i) => a + i.amountCents, 0); // invoices raised in QuickBooks, pre-tax
+  // Invoices raised in QuickBooks (pre-tax), except ones that are the QuickBooks copy of a progress bill posted here.
+  const billInvoiceRefs = new Map(postedBills.filter((b) => b.qboInvoiceId).map((b) => [b.qboInvoiceId!.trim(), b.number]));
+  const qboInvoicesShown = qboInvoices.map((i) => ({ ...i, matchedBill: billInvoiceRefs.get(i.docNumber ?? "") ?? billInvoiceRefs.get(i.qboTxnId) ?? null }));
+  const billedInQbo = qboInvoicesShown.filter((i) => i.matchedBill == null).reduce((a, i) => a + i.amountCents, 0);
   const billedToDate = postedBills.flatMap((b) => b.lines).reduce((a, l) => a + l.thisPeriodCents, 0) + billedInQbo;
 
   const econ = projectEconomics({
@@ -95,7 +98,7 @@ export async function loadProject(companyId: string, projectId: string) {
   const capital = project.projectType === "CAPITAL" ? capitalFlow(allDated, project.inServiceDate) : null;
 
   return {
-    project, codes, changeOrders: cos, costs, time, sov, bills, qboInvoices, billedInQbo, econ,
+    project, codes, changeOrders: cos, costs, time, sov, bills, qboInvoices: qboInvoicesShown, billedInQbo, econ,
     links, unitEvents, inventory, capital, datedCosts, datedLabour, events,
     budgetLines: budget,
     // revenue-based flags (loss, fade, underbilling) only apply to customer contracts

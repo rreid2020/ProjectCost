@@ -13,7 +13,7 @@ import { requireAdmin, requireWrite, type Tenant } from "@/lib/tenant";
 const nowIso = () => new Date().toISOString();
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 
-async function log(t: Tenant, entity: string, message: string, status = "QUEUED") {
+async function log(t: Tenant, entity: string, message: string, status = "OK") {
   await db.insert(s.syncLogs).values({ companyId: t.company.id, userId: t.userId, entity, direction: "PUSH", status, message, createdAt: nowIso() });
 }
 
@@ -33,8 +33,7 @@ export async function assignCost(form: FormData) {
     .set({ projectId, costCodeId, assignedAt: nowIso(), pendingPush: true })
     .where(and(eq(s.costTransactions.id, id), eq(s.costTransactions.companyId, t.company.id))).returning();
   if (!txn) return;
-  // When QBO is connected, the sync worker writes ProjectRef + Class back to the QBO line.
-  await log(t, "Bill line", `Assign ${txn.docNumber ?? txn.id} to project/cost code (writes ProjectRef on QBO line)`);
+  await log(t, "Bill line", `Coded ${txn.docNumber ?? txn.id} to a project and cost code in ProjectCost (QuickBooks unchanged)`);
   revalidatePath("/", "layout");
 }
 
@@ -102,7 +101,16 @@ export async function postProgressBill(form: FormData) {
     .where(and(eq(s.progressBills.id, str(form, "id")), eq(s.progressBills.companyId, t.company.id), eq(s.progressBills.status, "DRAFT"))).returning();
   if (!bill) return;
   const p = await ownProject(t.company.id, bill.projectId);
-  await log(t, "Invoice", `Progress bill #${bill.number} for ${p.number} → QBO Invoice (net of holdback; holdback to 'Holdbacks receivable')`);
+  await log(t, "Invoice", `Progress bill #${bill.number} posted for ${p.number}. Create the invoice in QuickBooks and enter its number on the bill`);
+  revalidatePath("/", "layout");
+}
+
+/** Records the QuickBooks invoice number for a posted progress bill, so the synced invoice isn't counted twice. */
+export async function linkProgressBillInvoice(form: FormData) {
+  const t = await requireWrite();
+  const invoice = str(form, "qboInvoice").slice(0, 40) || null;
+  await db.update(s.progressBills).set({ qboInvoiceId: invoice })
+    .where(and(eq(s.progressBills.id, str(form, "id")), eq(s.progressBills.companyId, t.company.id), eq(s.progressBills.status, "POSTED")));
   revalidatePath("/", "layout");
 }
 
@@ -135,7 +143,7 @@ export async function approveTime(form: FormData) {
   const rows = await db.update(s.timeEntries).set({ status: "APPROVED" })
     .where(and(inArray(s.timeEntries.id, ids), eq(s.timeEntries.companyId, t.company.id), eq(s.timeEntries.status, "SUBMITTED")))
     .returning({ id: s.timeEntries.id });
-  if (rows.length) await log(t, "TimeActivity", `${rows.length} approved time entr${rows.length === 1 ? "y" : "ies"} → QBO TimeActivity`);
+  if (rows.length) await log(t, "TimeActivity", `${rows.length} time entr${rows.length === 1 ? "y" : "ies"} approved in ProjectCost`);
   revalidatePath("/", "layout");
 }
 

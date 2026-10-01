@@ -247,7 +247,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     // Employees (rates are set in ProjectCost; QuickBooks' cost/bill rates only seed new rows)
     for (const part of chunk(qEmployees)) if (part.length)
       await tx.insert(s.employees).values(part.map((e) => ({
-        companyId: c, qboId: String(e.Id), name: String(e.DisplayName), trade: String(e.Title ?? "Employee"),
+        companyId: c, qboId: String(e.Id), name: String(e.DisplayName), trade: "Employee", // QuickBooks has no job title (its Title field is Mr./Ms.); set the trade in ProjectCost
         payRateCents: cents(e.CostRate), burdenBp: 0, billRateCents: cents(e.BillRate), active: e.Active !== false,
       }))).onConflictDoUpdate({ target: [s.employees.companyId, s.employees.qboId], set: { name: sql`excluded.name`, active: sql`excluded.active` } });
     const empRows = await tx.select().from(s.employees).where(and(eq(s.employees.companyId, c), isNotNull(s.employees.qboId)));

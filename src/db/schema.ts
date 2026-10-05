@@ -240,6 +240,7 @@ export const budgetLines = pgTable(
     costCodeId: text("cost_code_id").notNull(),
     originalCents: cents("original_cents").notNull(),
     notes: text("notes"),
+    importBatchId: text("import_batch_id"),
   },
   (t) => [uniqueIndex("budget_project_code").on(t.projectId, t.costCodeId), toProject("budget_line", t.companyId, t.projectId), toCostCode("budget_line", t.companyId, t.costCodeId)],
 );
@@ -256,6 +257,7 @@ export const changeOrders = pgTable(
     contractAmountCents: cents("contract_amount_cents").notNull(),
     dateIssued: text("date_issued").notNull(),
     dateApproved: text("date_approved"),
+    importBatchId: text("import_batch_id"),
   },
   (t) => [uniqueIndex("co_project_number").on(t.projectId, t.number), unique("change_order_tenant").on(t.companyId, t.id), toProject("change_order", t.companyId, t.projectId)],
 );
@@ -313,6 +315,9 @@ export const costTransactions = pgTable(
     qboLineAmountCents: cents("qbo_line_amount_cents"),
     qboExchangeRate: text("qbo_exchange_rate"),
     qboAccountId: text("qbo_account_id"), // GL account the line posted to (for netting job costs out of the overhead pool)
+    importBatchId: text("import_batch_id"), // spreadsheet batch that created it (null for QuickBooks / manual)
+    externalRef: text("external_ref"), // spreadsheet row key, for updating in place on re-import
+    sourceRow: integer("source_row"), // row number in the spreadsheet, for tracing
     assignedAt: text("assigned_at"),
     pendingPush: boolean("pending_push").notNull().default(false),
   },
@@ -322,6 +327,7 @@ export const costTransactions = pgTable(
     foreignKey({ name: "cost_transaction_vendor_fk", columns: [t.companyId, t.vendorId], foreignColumns: [vendors.companyId, vendors.id] }),
     index("cost_transaction_company_project").on(t.companyId, t.projectId),
     uniqueIndex("cost_transaction_company_qbo").on(t.companyId, t.qboTxnType, t.qboTxnId, t.qboLineId),
+    uniqueIndex("cost_transaction_company_ext").on(t.companyId, t.externalRef),
   ],
 );
 
@@ -341,6 +347,8 @@ export const timeEntries = pgTable(
     status: text("status").notNull().default("SUBMITTED"), // SUBMITTED | APPROVED
     notes: text("notes"),
     qboTimeActivityId: text("qbo_time_activity_id"),
+    importBatchId: text("import_batch_id"),
+    externalRef: text("external_ref"),
   },
   (t) => [
     foreignKey({ name: "time_entry_employee_fk", columns: [t.companyId, t.employeeId], foreignColumns: [employees.companyId, employees.id] }),
@@ -349,6 +357,7 @@ export const timeEntries = pgTable(
     index("time_entry_company_status").on(t.companyId, t.status),
     index("time_entry_project").on(t.projectId),
     uniqueIndex("time_entry_company_qbo").on(t.companyId, t.qboTimeActivityId),
+    uniqueIndex("time_entry_company_ext").on(t.companyId, t.externalRef),
   ],
 );
 
@@ -439,7 +448,7 @@ export const qboInvoices = pgTable(
     id: id(),
     companyId: companyId(),
     projectId: text("project_id").notNull(),
-    qboTxnType: text("qbo_txn_type").notNull(), // Invoice | CreditMemo
+    qboTxnType: text("qbo_txn_type").notNull(), // Invoice | CreditMemo (QuickBooks) | File (spreadsheet; qbo_txn_id holds the row key)
     qboTxnId: text("qbo_txn_id").notNull(),
     docNumber: text("doc_number"),
     date: text("date").notNull(),
@@ -449,8 +458,58 @@ export const qboInvoices = pgTable(
     taxCents: cents("tax_cents"),
     currency: text("currency"),
     exchangeRate: text("exchange_rate"),
+    importBatchId: text("import_batch_id"),
   },
   (t) => [uniqueIndex("qbo_invoice_company_txn").on(t.companyId, t.qboTxnType, t.qboTxnId), toProject("qbo_invoice", t.companyId, t.projectId)],
+);
+
+// ---------- Spreadsheet imports ----------
+// A parsed upload waiting for its column mapping to be confirmed. Deleted once imported (or after a day).
+export const importUploads = pgTable("import_upload", {
+  id: id(),
+  companyId: companyId(),
+  userId: text("user_id").notNull(),
+  kind: text("kind").notNull(), // see src/lib/imports/kinds.ts
+  fileName: text("file_name").notNull(),
+  sheets: text("sheets").notNull(), // JSON: { name, rows: string[][] }[]
+  sheetIndex: integer("sheet_index").notNull().default(0),
+  headerRow: integer("header_row").notNull().default(0),
+  mapping: text("mapping"), // JSON: { [fieldKey]: columnIndex }
+  createdAt: text("created_at").notNull(),
+});
+
+// One committed spreadsheet import. Undo removes the transactional rows it created.
+export const importBatches = pgTable(
+  "import_batch",
+  {
+    id: id(),
+    companyId: companyId(),
+    userId: text("user_id").notNull(),
+    kind: text("kind").notNull(),
+    fileName: text("file_name").notNull(),
+    sheetName: text("sheet_name"),
+    status: text("status").notNull(), // COMMITTED | UNDONE
+    created: integer("created").notNull().default(0),
+    updated: integer("updated").notNull().default(0),
+    skipped: integer("skipped").notNull().default(0),
+    toCode: integer("to_code").notNull().default(0), // rows that landed in Unassigned costs
+    createdAt: text("created_at").notNull(),
+    undoneAt: text("undone_at"),
+  },
+  (t) => [index("import_batch_company_created").on(t.companyId, t.createdAt)],
+);
+
+// The column mapping a company last used for each kind, by header name, reused on the next upload.
+export const importMappings = pgTable(
+  "import_mapping",
+  {
+    id: id(),
+    companyId: companyId(),
+    kind: text("kind").notNull(),
+    mapping: text("mapping").notNull(), // JSON: { [fieldKey]: headerName }
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("import_mapping_company_kind").on(t.companyId, t.kind)],
 );
 
 // Overhead pool: expense accounts from QuickBooks' Profit and Loss, and their monthly amounts.

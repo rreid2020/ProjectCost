@@ -17,17 +17,16 @@ export default async function Employees() {
   return (
     <div className="mx-auto max-w-6xl">
       <PageHeader title="Employees" subtitle="Labour job cost = approved hours × pay rate × (1 + burden)."
-        actions={<Link href="/settings" className="btn btn-secondary">Sync from QuickBooks</Link>} />
+        actions={<span className="flex gap-2"><Link href="/imports" className="btn btn-secondary">Import</Link><Link href="/settings" className="btn btn-secondary">Sync from QuickBooks</Link></span>} />
       <p className="mb-4 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-        <span className="font-medium">Where employees come from:</span> add them in QuickBooks (<span className="font-medium">Payroll → Employees → Add employee</span>), then
-        click <span className="font-medium">Sync now</span>. Their pay rate, burden and trade are set here, because QuickBooks doesn&apos;t carry them for job costing.
-        Subcontractors aren&apos;t employees: their cost arrives on their bills.
+        <span className="font-medium">Where employees come from:</span> QuickBooks (add them under <span className="font-medium">Payroll → Employees</span>, then <span className="font-medium">Sync now</span>),
+        or a spreadsheet on <Link href="/imports" className="underline">Import data</Link> (an <span className="font-medium">Employees &amp; rates</span> file, or a <span className="font-medium">Time</span> file adds people as it goes).
+        Pay rate, burden and trade are set here or in that spreadsheet; accounting systems don&apos;t carry them for job costing. Subcontractors aren&apos;t employees: their cost arrives on their bills.
       </p>
       <Card>
         {emps.length === 0 ? (
           <Empty>
-            No employees yet. Add them in QuickBooks, then <Link href="/settings" className="underline">Sync now</Link>.
-            <span className="mt-1 block text-xs">Display name and billing rate are enough in QuickBooks; payroll setup isn&apos;t needed.</span>
+            No employees yet. Add them in QuickBooks and <Link href="/settings" className="underline">sync</Link>, or <Link href="/imports" className="underline">import a spreadsheet</Link>.
           </Empty>
         ) : (
           <div className="overflow-x-auto">

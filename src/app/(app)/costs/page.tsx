@@ -19,11 +19,11 @@ export default async function Costs() {
   ]);
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader title="Unassigned costs" subtitle="Job costs from QuickBooks that still need a project or a cost code. Code them here. Coding is kept in ProjectCost and survives every sync; QuickBooks isn&apos;t changed." />
+      <PageHeader title="Unassigned costs" subtitle="Job costs from QuickBooks or spreadsheets that still need a project or a cost code. Code them here. Coding is kept in ProjectCost and survives every sync; QuickBooks isn&apos;t changed." />
       <Card title={`${items.length} waiting`}>
         {items.length === 0 ? <Empty>Everything is coded. Nice.</Empty> : (
           <table className="grid-table">
-            <thead><tr><th>Date</th><th>Vendor</th><th>QuickBooks transaction</th><th>Description</th><th>QuickBooks customer</th><th className="num">Amount</th><th>Assign to</th></tr></thead>
+            <thead><tr><th>Date</th><th>Vendor</th><th>QuickBooks transaction</th><th>Description</th><th>Source said</th><th className="num">Amount</th><th>Assign to</th></tr></thead>
             <tbody>{items.map((c) => (
               <tr key={c.id}>
                 <td className="whitespace-nowrap text-xs">{fmtDate(c.date)}</td>

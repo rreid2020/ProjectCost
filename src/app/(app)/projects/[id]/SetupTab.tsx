@@ -102,7 +102,7 @@ export function SetupTab({ data, saved, options }: { data: LoadedProject; saved:
         </form>
       </Card>
 
-      <Card title="Where this project's costs come from in QuickBooks" action={<span className="text-xs text-slate-500">Matched in this order: customer, class, location, GL account</span>}>
+      <Card title="Where this project's costs come from" action={<span className="text-xs text-slate-500">Matched in this order: customer, class, location, GL account</span>}>
         <div className="grid gap-3 p-4 text-sm">
           {p.qboProjectId && <p className="text-xs text-slate-600"><Badge tone="green">Customer</Badge> Created from QuickBooks customer #{p.qboProjectId}</p>}
           {data.links.length > 0 && (
@@ -115,7 +115,8 @@ export function SetupTab({ data, saved, options }: { data: LoadedProject; saved:
               ))}
             </ul>
           )}
-          {!p.qboProjectId && data.links.length === 0 && <p className="text-slate-600">Nothing linked yet. Costs reach this project only when coded in Unassigned costs.</p>}
+          <p className="text-xs text-slate-600"><Badge>Spreadsheets</Badge> Rows in imported files reach this project through its number, <span className="font-mono">{p.number}</span>.</p>
+          {!p.qboProjectId && data.links.length === 0 && <p className="text-slate-600">No QuickBooks links. Costs reach this project from spreadsheets with its number, or when coded in Unassigned costs.</p>}
           <div className="grid gap-2 border-t border-slate-100 pt-3">
             <LinkForm projectId={p.id} kind="customer" options={free("customer", options.customers.filter((c) => c.qboId), (c) => c.qboId!, (c) => c.name)} />
             <LinkForm projectId={p.id} kind="class" options={free("class", options.classes, (c) => c.qboId, (c) => c.name)} />

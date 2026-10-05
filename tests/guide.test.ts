@@ -12,7 +12,8 @@ import { guideFor } from "@/lib/guide-facts";
 
 const fresh: GuideFacts = {
   period: "2026-09", periodLabel: "September 2026", provinceSet: false, sampleData: false, qboConfigured: true, qboConnected: false, connectionOk: false,
-  memberCount: 1, projectModeChosen: false, imported: false, lastImportOk: true, daysSinceImport: null, glAccounts: 0, accountsReviewed: false,
+  memberCount: 1, projectModeChosen: false, imported: false, lastImportOk: true, daysSinceImport: null, sheetImports: 0, sheetCostImports: 0, daysSinceSheetCosts: null,
+  glAccounts: 0, accountsReviewed: false,
   entryAccountsMapped: false, costCodes: 0, labourCodes: 0, activeEmployees: 0, employeesWithoutRate: 0, employeesWithoutBurden: 0, activeProjects: 0,
   activeContracts: 0, contractsWithoutValue: 0, projectsWithoutBudget: 0, balanceSheetProjects: 0, internalWithoutLinks: 0, overheadPoolLoaded: false,
   overheadRateSet: false, unassignedCosts: 0, pendingTime: 0, pendingChangeOrders: 0, contractsForecastThisMonth: 0, contractsWithBudget: 0, draftBills: 0,
@@ -48,6 +49,22 @@ describe("guide rules", () => {
     expect(step(g, "close").marked).toBeNull(); // August's mark doesn't carry into September
     expect(step(g, "billing").status).toBe("done");
     expect(g.done).toBe(g.steps.filter((x) => x.status === "done" || x.status === "skipped").length);
+  });
+
+  it("adapts to where the data comes from", () => {
+    const sheets = buildGuide({ ...fresh, sheetImports: 3, sheetCostImports: 1, daysSinceSheetCosts: 2, activeProjects: 4 }, []);
+    expect(step(sheets, "connect").status).toBe("done");
+    expect(step(sheets, "sync").status).toBe("done");
+    expect(step(sheets, "import").status).toBe("done");
+    const sheetText = sheets.steps.flatMap((x) => x.how).join(" ");
+    expect(sheetText).toMatch(/Import data/);
+    expect(step(sheets, "employees").how.join(" ")).not.toMatch(/In QuickBooks/);
+    const qbo = buildGuide({ ...fresh, qboConnected: true, connectionOk: true, imported: true, daysSinceImport: 1 }, []);
+    expect(step(qbo, "sync").how.join(" ")).toMatch(/Sync now/);
+    expect(step(qbo, "sync").how.join(" ")).not.toMatch(/spreadsheet/i); // QuickBooks-only company isn't pushed to spreadsheets
+    expect(step(qbo, "sync").openLabel).toBe("Open settings");
+    // a company with nothing connected yet sees both ways in
+    expect(step(buildGuide(fresh, []), "connect").how.join(" ")).toMatch(/QuickBooks Online.*spreadsheets/);
   });
 
   it("adds checks only when they apply", () => {

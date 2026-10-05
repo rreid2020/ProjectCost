@@ -25,7 +25,7 @@ export default async function Time() {
       <div className="grid gap-5 lg:grid-cols-3">
         <Card title="Log time">
           <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-            Time entered in QuickBooks arrives approved when you sync. Use this form for time not in QuickBooks. Employees come from QuickBooks: add them there, then sync.
+            Time synced from QuickBooks or imported from a spreadsheet (QuickBooks Time, ClockShark, Procore…) arrives approved. Use this form for anything else.
           </p>
           <form action={addTimeEntry} className="grid gap-3 p-4 text-sm">
             <label className="grid gap-1"><span className="text-xs text-slate-600">Employee</span>

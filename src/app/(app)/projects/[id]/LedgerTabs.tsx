@@ -45,11 +45,17 @@ export function CostsTab({ data, ctx, code, region }: { data: LoadedProject; ctx
         {costs.length === 0 ? <Empty>No cost lines{filterName ? " for this cost code" : ""}.</Empty> : (
           <div className="max-h-[640px] overflow-auto">
             <table className="grid-table">
-              <thead><tr><th>Date</th><th>QuickBooks transaction</th><th>Vendor</th><th>Description</th><th>Cost code</th><th className="num">Amount</th>{recoverable && <th className="num">Tax (ITC)</th>}</tr></thead>
+              <thead><tr><th>Date</th><th>Source</th><th>Vendor</th><th>Description</th><th>Cost code</th><th className="num">Amount</th>{recoverable && <th className="num">Tax (ITC)</th>}</tr></thead>
               <tbody>{costs.map((c) => (
                 <tr key={c.id}>
                   <td className="whitespace-nowrap text-xs">{fmtDate(c.date)}</td>
-                  <td><QboRef ctx={ctx} type={c.qboTxnType} id={c.qboTxnId} source={c.source} doc={c.docNumber} line={c.qboLineId} /></td>
+                  <td>
+                    {c.importBatchId ? (
+                      <div className="whitespace-nowrap text-xs">{c.docNumber ?? c.source}
+                        <span className="block text-[0.68rem] text-slate-400" title="Imported from a spreadsheet">{data.sourceFiles[c.importBatchId] ?? "Spreadsheet"}{c.sourceRow ? `, row ${c.sourceRow}` : ""}</span>
+                      </div>
+                    ) : <QboRef ctx={ctx} type={c.qboTxnType} id={c.qboTxnId} source={c.source} doc={c.docNumber} line={c.qboLineId} />}
+                  </td>
                   <td>{c.vendor?.name}</td>
                   <td className="text-slate-600">{c.description}</td>
                   <td className="font-mono text-xs">{c.costCode?.code ?? <Link href="/costs" className="text-amber-700 underline">needs code</Link>}</td>
@@ -92,7 +98,7 @@ export function TimeTab({ data, code }: { data: LoadedProject; code?: string }) 
                   <td className="num text-xs">{(t.burdenBp / 100).toFixed(1)}%</td>
                   <td className="num"><M v={lc.total} cents /></td>
                   <td><StatusBadge status={t.status} /></td>
-                  <td className="text-xs text-slate-500">{t.qboTimeActivityId ? `QBO time #${t.qboTimeActivityId}` : "ProjectCost"}</td>
+                  <td className="text-xs text-slate-500">{t.qboTimeActivityId ? `QBO time #${t.qboTimeActivityId}` : t.importBatchId ? data.sourceFiles[t.importBatchId] ?? "Spreadsheet" : "ProjectCost"}</td>
                 </tr>
               );
             })}</tbody>

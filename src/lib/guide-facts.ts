@@ -65,6 +65,10 @@ export const guideFor = cache(async (company: Company, orgId: string, now = new 
     one(db.select({ n: count() }).from(s.wipSnapshots).where(and(eq(s.wipSnapshots.companyId, c), eq(s.wipSnapshots.periodEnd, end)))),
     members,
   ]);
+  const sheetBatches = await db.select({ kind: s.importBatches.kind, createdAt: s.importBatches.createdAt }).from(s.importBatches)
+    .where(and(eq(s.importBatches.companyId, c), eq(s.importBatches.status, "COMMITTED")));
+  const sheetCosts = sheetBatches.filter((b) => b.kind === "costs" || b.kind === "time");
+  const lastSheetCost = sheetCosts.reduce<string | null>((a, b) => (a && a > b.createdAt ? a : b.createdAt), null);
   const overhead = await companyOverhead(company, now);
 
   const daysSinceImport = company.qboLastImportAt ? Math.floor((now.getTime() - new Date(company.qboLastImportAt).getTime()) / 86_400_000) : null;
@@ -74,6 +78,8 @@ export const guideFor = cache(async (company: Company, orgId: string, now = new 
     qboConfigured: qboConfigured(), qboConnected: Boolean(company.qboRealmId), connectionOk: Boolean(company.qboRealmId) && connectionOk > 0,
     memberCount,
     projectModeChosen: Boolean(company.qboProjectMode), imported: Boolean(company.qboLastImportAt), lastImportOk: lastRun?.status !== "ERROR", daysSinceImport,
+    sheetImports: sheetBatches.length, sheetCostImports: sheetCosts.length,
+    daysSinceSheetCosts: lastSheetCost ? Math.floor((now.getTime() - new Date(lastSheetCost).getTime()) / 86_400_000) : null,
     glAccounts, accountsReviewed: accountsReviewed > 0,
     entryAccountsMapped: Boolean(company.cipAccountId || company.wipInventoryAccountId) && Boolean(company.labourCreditAccountId),
     costCodes, labourCodes, activeEmployees, employeesWithoutRate, employeesWithoutBurden,

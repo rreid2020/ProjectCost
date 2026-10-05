@@ -33,7 +33,7 @@ const SOLUTIONS: { label: string; title: string; body: string }[] = [
 ];
 
 const NOT_DO: { title: string; body: string }[] = [
-  { title: "It doesn't replace QuickBooks.", body: "QuickBooks stays your general ledger. ProjectCost reads from it and drafts the entries for you to book there." },
+  { title: "It doesn't replace your accounting system.", body: "QuickBooks, Sage or Xero stays your general ledger. ProjectCost reads from it (connected, or from spreadsheets) and drafts the entries for you to book there." },
   { title: "It isn't payroll or a time clock.", body: "Hours come from QuickBooks time or are entered in ProjectCost; pay rates and burden are set per employee." },
   { title: "It doesn't judge your estimates.", body: "Budgets, estimates to complete and contract values are management's. It applies them consistently and shows the consequences." },
   { title: "It isn't an estimating or scheduling tool.", body: "It starts when the budget exists and follows the money from there." },
@@ -48,6 +48,7 @@ const STEPS: { title: string; body: string }[] = [
 ];
 
 const FAQ: { q: string; a: string }[] = [
+  { q: "Do I need QuickBooks?", a: "No. Connect QuickBooks Online, or import CSV or Excel files: projects, budgets, costs, time, employees, invoices, accounts and a monthly Profit and Loss. Columns from Sage, Xero, QuickBooks Time, ClockShark and Procore exports are recognized automatically, and you can mix both sources." },
   { q: "Do I need QuickBooks Projects turned on?", a: "No. Projects can come from customers, sub-customers, QuickBooks Projects, classes, locations or GL accounts, or any mix of them." },
   { q: "Does it write to QuickBooks?", a: "Not yet. It reads your books and drafts journal entries with a [ProjectCost] memo for you to book. The memo stops the next import from counting them twice. Write-back is on the roadmap." },
   { q: "Which QuickBooks Online plans does it work with?", a: "QuickBooks Online in Canada and the US. Class and location tracking need Plus or Advanced." },
@@ -84,13 +85,13 @@ export default function Landing() {
       {/* Hero */}
       <section className="bg-[#00204A] text-[#DBE6F2]">
         <div className="mx-auto max-w-6xl px-4 py-16 md:py-20">
-          <Eyebrow light>Job costing · Capital projects · Build for sale · QuickBooks Online</Eyebrow>
+          <Eyebrow light>Job costing · Capital projects · Build for sale · QuickBooks Online or spreadsheets</Eyebrow>
           <h1 className={`${serif} mt-3 text-4xl font-semibold text-white md:text-5xl`}>ProjectCost</h1>
           <p className="mt-5 max-w-2xl text-lg">
             The project layer QuickBooks Online is missing. <strong className="text-white">Budgets, change orders, progress billing, WIP and month-end entries</strong> for
-            customer contracts, capital projects and builds for sale, built from the books you already keep.
+            customer contracts, capital projects and builds for sale, built from the books you already keep: QuickBooks Online, or spreadsheet exports from Sage, Xero and your field time app.
           </p>
-          <p className="mt-4 text-lg">It doesn&apos;t replace QuickBooks. It finishes the job.</p>
+          <p className="mt-4 text-lg">It doesn&apos;t replace your accounting system. It finishes the job.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/sign-up" className="rounded-md border-2 border-white bg-white px-5 py-2.5 font-semibold text-[#00204A] hover:bg-slate-100">Start your {TRIAL_DAYS}-day free trial</Link>
             <a href={DEMO_URL} className="rounded-md border-2 border-white/55 px-5 py-2.5 font-semibold text-white hover:border-white">Book a demo</a>
@@ -104,7 +105,7 @@ export default function Landing() {
         <dl className="mx-auto grid max-w-6xl grid-cols-1 gap-3 px-4 py-6 sm:grid-cols-2 lg:grid-cols-4">
           {[
             ["Cost", `Free for ${TRIAL_DAYS} days, then a monthly plan per company. No card to start.`],
-            ["Works with", "QuickBooks Online (Plus or Advanced for classes and locations), Canada and US."],
+            ["Works with", "QuickBooks Online, or CSV / Excel exports from Sage, Xero, QuickBooks Time, ClockShark, Procore, or your own workbooks."],
             ["Built for", "Contractors and trades, home builders and fabricators, organizations with capital projects, and their accountants."],
             ["Output", "Surety-format WIP schedule, draft journal entries, and profit after overhead by project."],
           ].map(([k, v]) => (

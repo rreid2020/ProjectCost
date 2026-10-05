@@ -12,7 +12,8 @@ const items = [
   { href: "/overhead", label: "Overhead" },
   { href: "/cost-codes", label: "Cost codes" },
   { href: "/accounts", label: "Accounts" },
-  { href: "/settings", label: "QuickBooks & settings" },
+  { href: "/imports", label: "Import data" },
+  { href: "/settings", label: "Settings" },
   { href: "/team", label: "Team" },
   { href: "/billing", label: "Billing" },
 ];

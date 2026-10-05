@@ -89,6 +89,12 @@ export async function loadProject(companyId: string, projectId: string) {
     holdbackBp: project.holdbackBp,
   });
 
+  // Which spreadsheet each imported line came from, for tracing
+  const batchIds = [...new Set([...costs, ...time].map((x) => x.importBatchId).filter(Boolean))] as string[];
+  const sourceFiles = Object.fromEntries((batchIds.length
+    ? await db.select({ id: s.importBatches.id, fileName: s.importBatches.fileName }).from(s.importBatches).where(and(eq(s.importBatches.companyId, companyId), inArray(s.importBatches.id, batchIds)))
+    : []).map((b) => [b.id, b.fileName]));
+
   // Balance-sheet view for capital and build-for-sale projects
   const datedCosts: DatedCost[] = costs.map((c) => ({ date: c.date, amount: c.amountCents, account: c.qboAccountId }));
   const datedLabour = time.filter((t) => t.status === "APPROVED").map((t) => ({ date: t.date, amount: labourCost(t.hoursX100, t.payRateCents, t.burdenBp).total }));
@@ -99,7 +105,7 @@ export async function loadProject(companyId: string, projectId: string) {
 
   return {
     project, codes, changeOrders: cos, costs, time, sov, bills, qboInvoices: qboInvoicesShown, billedInQbo, econ,
-    links, unitEvents, inventory, capital, datedCosts, datedLabour, events,
+    links, unitEvents, inventory, capital, datedCosts, datedLabour, events, sourceFiles,
     budgetLines: budget,
     // revenue-based flags (loss, fade, underbilling) only apply to customer contracts
     flags: project.projectType === "CONTRACT" ? healthFlags(econ) : [

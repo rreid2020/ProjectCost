@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db, schema as s } from "@/db";
 import { desc, eq } from "drizzle-orm";
 import { getTenant } from "@/lib/tenant";
@@ -50,7 +51,11 @@ export default async function Settings({ searchParams }: { searchParams: Promise
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="QuickBooks & settings" />
+      <PageHeader title="Settings" subtitle="Company details and where your data comes from: QuickBooks Online, spreadsheets, or both." />
+      <p className="mb-5 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+        <span className="font-medium">Using spreadsheets?</span> Projects, budgets, costs, time, employees, invoices, accounts and a monthly Profit and Loss can all be loaded
+        from CSV or Excel on <Link href="/imports" className="text-brand-600 underline">Import data</Link>, alongside QuickBooks or instead of it.
+      </p>
       <div className="grid gap-5 md:grid-cols-2">
         <Card title="QuickBooks Online connection" action={company.qboRealmId ? <Badge tone="green">Connected</Badge> : <Badge tone="amber">Not connected</Badge>}>
           <div className="grid gap-3 p-4 text-sm">

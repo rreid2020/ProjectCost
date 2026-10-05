@@ -97,6 +97,21 @@ scripts/                 migrate + local reset
 drizzle/                 SQL migrations (regenerate with `npm run db:generate` after schema changes)
 ```
 
+## Spreadsheet imports
+
+**Import data** (admins) loads CSV or Excel (.xlsx) files, alongside QuickBooks or instead of it. Ten kinds: projects, budgets, cost codes,
+cost transactions, time, employees & rates, invoices billed, change orders, chart of accounts, and Profit & Loss by month (overhead pool).
+
+1. Upload: the sheet and header row are found automatically (title rows above the headers are fine).
+2. Match columns: fields are matched by name, including Sage 50/300, Xero, QuickBooks Time / TSheets, ClockShark and Procore exports;
+   the mapping a company confirms is remembered for its next upload. Each kind has a downloadable CSV template.
+3. Preview: every row is checked with the same rules as the import; problems are listed by row. Import is all or nothing, or skip the problem rows.
+
+Rows find their project by **project number**, cost codes by code, vendors and employees by name (new ones are added). Costs whose project or code
+doesn't match go to **Unassigned costs**. Cost, time and invoice rows get a stable key (your ID column, or a fingerprint of the row), so
+re-importing the same lines updates them instead of duplicating, and coding done in ProjectCost is kept. Imports of costs, time, budgets,
+invoices and change orders can be undone (removes the rows that import created). Code: `src/lib/imports/`.
+
 ## Project types
 
 - **Customer contract**: revenue, change orders, progress billing with holdback, cost-to-cost % complete, the WIP schedule and over/under billings.

@@ -44,7 +44,7 @@ To test payments, put test-mode keys in `.env.local` and forward webhooks with t
 
 ## Deploy (Vercel + Neon)
 
-1. **Neon:** create a project and copy the **pooled** connection string.
+1. **Neon:** in the Vercel project, **Storage → Create Database → Neon**, connected to Production, Preview and Development. That adds `DATABASE_URL` (pooled, used by the app) and `DATABASE_URL_UNPOOLED` (direct, used for migrations). Or create it at neon.tech and add those two variables yourself.
 2. **Clerk:** create a production instance for your domain (organizations on, personal accounts off). Add a webhook endpoint
    `https://<your-domain>/api/clerk/webhook` for `organization.updated` and `organization.deleted`.
 3. **Stripe:** create a product with a recurring price per plan (Starter, Pro). Turn on the **customer portal** (Settings → Billing → Customer portal)

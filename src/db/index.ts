@@ -23,6 +23,9 @@ function connect(): Conn {
     const pool = new Pool({ connectionString: url, max: Number(process.env.DATABASE_POOL_MAX ?? 5) });
     return { kind: "pg", pool, db: drizzlePg(pool, { schema }) };
   }
+  // On Vercel (or any hosted build) the local file database can't work: say so instead of failing obscurely.
+  if (process.env.VERCEL && url !== "memory://")
+    throw new Error("DATABASE_URL isn't set to a Postgres connection string. Add a Neon database to this Vercel project (Storage → Neon) and redeploy.");
   const dir = url.replace(/^file:/, "");
   if (url !== "memory://") mkdirSync(dir, { recursive: true });
   const client = url === "memory://" ? new PGlite() : new PGlite(dir);

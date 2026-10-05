@@ -3,8 +3,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ProjectCost — job costing for QuickBooks Online",
-  description: "Budgets, cost codes, progress billing and WIP on top of QuickBooks Online.",
+  title: "ProjectCost — project costing, WIP and month-end",
+  description: "Budgets, change orders, progress billing, WIP and month-end entries on top of your accounting system: QuickBooks, Sage, Xero or spreadsheets.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

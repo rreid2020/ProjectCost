@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-brand-900 py-5 md:flex">
         <div className="mb-4 px-5">
           <Link href="/dashboard" className="text-lg font-semibold tracking-tight text-white">ProjectCost</Link>
-          <div className="text-xs text-brand-100/80">Job costing for QuickBooks Online</div>
+          <div className="text-xs text-brand-100/80">Project costing &amp; WIP</div>
         </div>
         <div className="mb-4 px-3">
           <OrganizationSwitcher

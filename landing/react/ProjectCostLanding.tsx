@@ -1,11 +1,25 @@
-import Link from "next/link";
-import { Show } from "@clerk/nextjs";
-import { PLANS, TRIAL_DAYS, type PlanKey } from "@/lib/plans";
+// ProjectCost landing page: a self-contained React component with no app, Next.js or Clerk dependencies,
+// so it can live on the marketing website (axiomft.ca) while the app runs on its own address.
+// Styling is Tailwind utility classes. `npm run build:landing` also renders it to a standalone HTML file.
 
-// Landing page, patterned on axiomft.ca/resources/aro-recalculation: the problem (where general ledgers fall short for
-// project accounting), then how ProjectCost answers each point, what it does not do, how it works, and questions.
-// Accounting-system neutral: QuickBooks Online is one source among Sage, Xero and spreadsheets.
-const DEMO_URL = "https://axiomft.ca/book-consultation";
+// Structure follows axiomft.ca/resources/aro-recalculation: the problem (where general ledgers fall short for project
+// accounting), how ProjectCost answers each point, what it does not do, how it works, pricing and questions.
+export const DEFAULT_APP_URL = "https://project-cost-hlls.vercel.app";
+export const DEFAULT_DEMO_URL = "https://axiomft.ca/book-consultation";
+
+export type LandingPlan = { name: string; blurb: string; features: readonly string[] };
+export const DEFAULT_PLANS: LandingPlan[] = [
+  { name: "Starter", blurb: "For a single estimator or PM running a handful of jobs.", features: ["Budgets, change orders & progress billing", "WIP schedule & month-end entries", "QuickBooks Online sync"] },
+  { name: "Pro", blurb: "For contractors with several PMs and field crews.", features: ["Everything in Starter", "Unlimited team members", "Surety-format WIP exports & priority support"] },
+];
+
+export type LandingProps = {
+  /** Where the ProjectCost app runs; buttons go to /sign-up and /sign-in there. */
+  appUrl?: string;
+  demoUrl?: string;
+  trialDays?: number;
+  plans?: LandingPlan[];
+};
 const serif = "font-[Georgia,'Times_New_Roman',serif]";
 const navy = "text-[#00204A]";
 
@@ -64,21 +78,21 @@ function Eyebrow({ children, light = false }: { children: React.ReactNode; light
   return <p className={`text-xs font-bold uppercase tracking-[0.12em] ${light ? "text-[#7FC7CF]" : "text-[#0E7C86]"}`}>{children}</p>;
 }
 
-export default function Landing() {
+export function ProjectCostLanding({ appUrl = DEFAULT_APP_URL, demoUrl = DEFAULT_DEMO_URL, trialDays = 14, plans = DEFAULT_PLANS }: LandingProps) {
+  const app = appUrl.replace(/\/$/, "");
+  const TRIAL_DAYS = trialDays;
   return (
-    <div className="min-h-screen bg-white text-[#12202F]">
+    <div id="top" className="min-h-screen bg-white text-[#12202F]">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-          <Link href="/" className="leading-tight">
+          <a href="#top" className="leading-tight">
             <span className={`${serif} text-xl font-semibold ${navy}`}>ProjectCost</span>
             <span className="block text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-[#0E7C86]">by Axiom</span>
-          </Link>
+          </a>
           <nav className="flex items-center gap-2 text-sm">
             <a href="#pricing" className="hidden px-3 py-1.5 text-slate-600 hover:text-slate-900 sm:inline">Pricing</a>
-            <Show when="signed-out" fallback={<Link href="/dashboard" className="rounded-md bg-[#0E7C86] px-4 py-2 font-semibold text-white hover:bg-[#0b6870]">Open app</Link>}>
-              <Link href="/sign-in" className="px-3 py-1.5 text-slate-600 hover:text-slate-900">Sign in</Link>
-              <Link href="/sign-up" className="rounded-md bg-[#0E7C86] px-4 py-2 font-semibold text-white hover:bg-[#0b6870]">Start free trial</Link>
-            </Show>
+            <a href={`${app}/sign-in`} className="px-3 py-1.5 text-slate-600 hover:text-slate-900">Sign in</a>
+            <a href={`${app}/sign-up`} className="rounded-md bg-[#0E7C86] px-4 py-2 font-semibold text-white hover:bg-[#0b6870]">Start free trial</a>
           </nav>
         </div>
       </header>
@@ -94,8 +108,8 @@ export default function Landing() {
           </p>
           <p className="mt-4 text-lg">It doesn&apos;t replace your accounting system. It finishes the job.</p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/sign-up" className="rounded-md border-2 border-white bg-white px-5 py-2.5 font-semibold text-[#00204A] hover:bg-slate-100">Start your {TRIAL_DAYS}-day free trial</Link>
-            <a href={DEMO_URL} className="rounded-md border-2 border-white/55 px-5 py-2.5 font-semibold text-white hover:border-white">Book a demo</a>
+            <a href={`${app}/sign-up`} className="rounded-md border-2 border-white bg-white px-5 py-2.5 font-semibold text-[#00204A] hover:bg-slate-100">Start your {TRIAL_DAYS}-day free trial</a>
+            <a href={demoUrl} className="rounded-md border-2 border-white/55 px-5 py-2.5 font-semibold text-white hover:border-white">Book a demo</a>
           </div>
           <p className="mt-8 text-sm text-[#DBE6F2]/90">{TRIAL_DAYS}-day free trial · Any ledger, connected or by spreadsheet · Canada &amp; US · Every number traced to its source</p>
         </div>
@@ -197,12 +211,12 @@ export default function Landing() {
           <h2 className={`${serif} mt-2 text-3xl font-semibold ${navy}`}>Every plan starts with a {TRIAL_DAYS}-day free trial.</h2>
           <p className="mt-2 text-sm text-slate-600">Billed per company. Cancel any time from the billing page.</p>
           <div className="mt-8 grid gap-6 md:grid-cols-2">
-            {(Object.keys(PLANS) as PlanKey[]).map((k) => (
-              <div key={k} className="rounded-md border border-[#D9E1EA] bg-white p-6">
-                <h3 className={`${serif} text-xl font-semibold ${navy}`}>{PLANS[k].name}</h3>
-                <p className="mt-1 text-sm text-slate-600">{PLANS[k].blurb}</p>
-                <ul className="mt-4 grid gap-1.5 text-sm">{PLANS[k].features.map((f) => <li key={f}>✓ {f}</li>)}</ul>
-                <Link href="/sign-up" className="mt-6 block rounded-md bg-[#0E7C86] px-4 py-2 text-center font-semibold text-white hover:bg-[#0b6870]">Start free trial</Link>
+            {plans.map((plan) => (
+              <div key={plan.name} className="rounded-md border border-[#D9E1EA] bg-white p-6">
+                <h3 className={`${serif} text-xl font-semibold ${navy}`}>{plan.name}</h3>
+                <p className="mt-1 text-sm text-slate-600">{plan.blurb}</p>
+                <ul className="mt-4 grid gap-1.5 text-sm">{plan.features.map((f) => <li key={f}>✓ {f}</li>)}</ul>
+                <a href={`${app}/sign-up`} className="mt-6 block rounded-md bg-[#0E7C86] px-4 py-2 text-center font-semibold text-white hover:bg-[#0b6870]">Start free trial</a>
               </div>
             ))}
           </div>
@@ -231,8 +245,8 @@ export default function Landing() {
           <h2 className={`${serif} text-3xl font-semibold text-white`}>See where your projects really stand.</h2>
           <p className="mt-3 max-w-2xl">Bring in last month&apos;s exports and run your first WIP schedule free, or walk through it with us on sample data before you touch your own books.</p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <Link href="/sign-up" className="rounded-md border-2 border-white bg-white px-5 py-2.5 font-semibold text-[#00204A] hover:bg-slate-100">Start your free trial</Link>
-            <a href={DEMO_URL} className="rounded-md border-2 border-white/55 px-5 py-2.5 font-semibold text-white hover:border-white">Book a demo</a>
+            <a href={`${app}/sign-up`} className="rounded-md border-2 border-white bg-white px-5 py-2.5 font-semibold text-[#00204A] hover:bg-slate-100">Start your free trial</a>
+            <a href={demoUrl} className="rounded-md border-2 border-white/55 px-5 py-2.5 font-semibold text-white hover:border-white">Book a demo</a>
           </div>
         </div>
       </section>

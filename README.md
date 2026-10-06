@@ -80,6 +80,25 @@ To test payments, put test-mode keys in `.env.local` and forward webhooks with t
 
 Engine code: `src/lib/engine.ts` (pure functions). Tests: `tests/engine.test.ts`.
 
+## Landing page (hosted on the main website)
+
+The marketing page is not served by the app. It lives in `src/marketing/Landing.tsx`, a React component with no Next.js,
+Clerk or app imports, and is published to the main website. Its buttons link into the app (`/sign-up`, `/sign-in`).
+
+```
+npm run build:landing                                 # buttons -> the default app address
+LANDING_APP_URL=https://projectcost.axiomft.ca npm run build:landing
+```
+
+That writes:
+- `landing/dist/projectcost.html`: one self-contained page (all CSS inline, no scripts). Upload it as a page on the website,
+  or paste the `<style>` and `<body>` contents into a custom-HTML block.
+- `landing/react/ProjectCostLanding.tsx`: the component, for a React/Next.js site that uses Tailwind 4.
+  `<ProjectCostLanding appUrl="https://projectcost.axiomft.ca" />`; `demoUrl`, `trialDays` and `plans` are optional props.
+
+In the app, set `MARKETING_URL` (for example `https://axiomft.ca/projectcost`) so signed-out visitors to the app's root
+and people who sign out go to the landing page; without it they go to sign-in.
+
 ## Project layout
 
 ```
@@ -90,7 +109,8 @@ src/lib/plans.ts         plans, trial length, subscription access rules
 src/lib/stripe.ts        Stripe client + subscription sync
 src/lib/engine.ts        costing engine: roll-ups, WIP, billing, journal entries
 src/lib/queries.ts       loads a project from the DB and runs the engine
-src/app/(app)/           signed-in app pages          src/app/(marketing)/  public landing page
+src/app/(app)/           signed-in app pages          src/app/page.tsx      root: dashboard, or MARKETING_URL
+src/marketing/Landing.tsx  public landing page (standalone component; see "Landing page")
 src/app/onboarding/      company setup                src/app/api/          Stripe + Clerk webhooks
 src/app/*actions.ts      server actions
 scripts/                 migrate + local reset

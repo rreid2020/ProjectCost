@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env.local scripts/migrate.ts",
     "db:reset-local": "tsx --env-file-if-exists=.env.local scripts/reset-local.ts",
-    "setup": "npm run db:migrate"
+    "setup": "npm run db:migrate",
+    "build:landing": "tsx --tsconfig scripts/tsconfig.landing.json scripts/build-landing.tsx"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.7",

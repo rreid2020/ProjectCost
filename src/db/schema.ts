@@ -24,7 +24,7 @@ export const companies = pgTable("company", {
   qboRealmId: text("qbo_realm_id"),
   qboConnectedAt: text("qbo_connected_at"),
   qboCompanyName: text("qbo_company_name"), // CompanyInfo.CompanyName at connect time
-  qboProjectMode: text("qbo_project_mode"), // what a project is in QuickBooks: "jobs" (sub-customers/Projects) | "customers"
+  qboProjectMode: text("qbo_project_mode"), // projects from QuickBooks customers: "none" (default; projects are made in ProjectCost) | "jobs" (sub-customers/Projects) | "customers"
   qboLastImportAt: text("qbo_last_import_at"),
   // overhead (management view only: never changes job cost, WIP or QuickBooks)
   overheadBasis: text("overhead_basis").notNull().default("labour_cost"), // labour_cost | labour_hours | direct_cost

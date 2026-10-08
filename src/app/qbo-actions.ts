@@ -39,13 +39,14 @@ export async function testQboConnection() {
   redirect(`/settings?qbo=${status}`);
 }
 
-/** Imports (or re-syncs) from QuickBooks. First run also records how projects are set up in QuickBooks. */
+/** Imports (or re-syncs) from QuickBooks, and records whether QuickBooks customers should also become projects. */
 export async function importFromQbo(form: FormData) {
   const t = await requireAdmin();
   if (!t.company.qboRealmId) redirect("/settings");
   if (t.company.sampleDataLoadedAt) redirect("/settings?qbo=remove_sample");
   const mode = String(form.get("mode") ?? "");
-  if (mode === "jobs" || mode === "customers") await db.update(s.companies).set({ qboProjectMode: mode }).where(eq(s.companies.id, t.company.id));
+  // "none" (default): projects are created in ProjectCost; "jobs" / "customers": also create projects from QuickBooks customers
+  if (mode === "none" || mode === "jobs" || mode === "customers") await db.update(s.companies).set({ qboProjectMode: mode }).where(eq(s.companies.id, t.company.id));
 
   // one run at a time per company (a run older than 15 minutes is treated as dead)
   const recent = await db.query.qboImportRuns.findFirst({

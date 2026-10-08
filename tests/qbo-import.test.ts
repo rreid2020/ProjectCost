@@ -87,12 +87,27 @@ const rows = {
 beforeAll(async () => { await migrateDb(); });
 
 describe("guards", () => {
-  it("refuses a workspace that still has sample data, or no project mode", async () => {
+  it("refuses a workspace that still has sample data", async () => {
     const sample = await newCompany("Sample");
     await loadDemoData(db, sample.id);
     await expect(runImport({ companyId: sample.id, query: queryFor(fixtures()), now: NOW })).rejects.toThrow("sample data");
-    const noMode = await newCompany("NoMode", { qboProjectMode: null });
-    await expect(runImport({ companyId: noMode.id, query: queryFor(fixtures()), now: NOW })).rejects.toThrow("Choose how projects");
+  });
+  it("by default creates no projects: costs come in unassigned, and an assignment made in ProjectCost survives a re-sync", async () => {
+    for (const mode of [null, "none"]) {
+      const c = (await newCompany(`NoProjects-${mode}`, { qboProjectMode: mode })).id;
+      const summary = await runImport({ companyId: c, query: queryFor(fixtures()), now: NOW });
+      expect(summary.projects).toBe(0);
+      expect(await rows.projects(c)).toHaveLength(0);
+      const costs = await rows.costs(c);
+      expect(costs.length).toBeGreaterThan(0);
+      expect(costs.every((x) => x.projectId === null)).toBe(true);
+      expect(summary.needsCoding).toBe(costs.length);
+      // the bookkeeper assigns one line in ProjectCost; the next sync keeps it
+      const [p] = await db.insert(s.projects).values({ companyId: c, number: "P-1", name: "Made in ProjectCost", originalContractCents: 0 }).returning();
+      await db.update(s.costTransactions).set({ projectId: p.id }).where(eq(s.costTransactions.id, costs[0].id));
+      await runImport({ companyId: c, query: queryFor(fixtures()), now: NOW });
+      expect((await rows.costs(c)).find((x) => x.id === costs[0].id)?.projectId).toBe(p.id);
+    }
   });
   it("derives project numbers from job names", () => {
     const taken = new Set<string>(["QB-1"]);

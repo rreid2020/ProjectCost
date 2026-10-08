@@ -98,7 +98,7 @@ export const GUIDE_STEPS: GuideStepDef[] = [
     key: "import", group: "Set up", title: "Bring in projects and costs", href: (f) => (f.qboConnected ? "/settings" : "/imports"), openLabel: "Open import",
     why: "Projects, costs, time and billing need to be in ProjectCost before anything can be measured. Re-running an import updates in place; it doesn't duplicate.",
     how: (f) => [
-      ...(via(f).qbo ? [`**From QuickBooks:** on **Settings**, under **Import from QuickBooks**, choose how you track jobs (sub-customers / Projects, or each customer is a job) and click **Start import**.`] : []),
+      ...(via(f).qbo ? [`**From QuickBooks:** on **Settings**, under **Import from QuickBooks**, click **Start import**. Costs come in from QuickBooks; lines not linked to a project wait in **Unassigned costs** for you to assign. (Optional: have existing QuickBooks jobs or customers become projects too.)`] : []),
       ...(via(f).sheets ? [
         `${SH} on **Import data**, import in this order: **Projects** → **Cost codes** → **Budgets** → **Employees** → **Cost transactions** and **Time** → **Invoices billed**.`,
         "Each upload shows a preview with any problems by row; costs whose project or code doesn't match go to **Unassigned costs** instead of being lost.",

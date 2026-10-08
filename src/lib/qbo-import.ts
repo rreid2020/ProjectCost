@@ -3,14 +3,17 @@
 //
 // What comes in:
 //   Customer (top level)          -> customer
-//   Customer that is a project    -> project   ("jobs" mode: sub-customers / QBO Projects; "customers" mode: any customer with activity)
+//   Customer that is a project    -> project, only if the company opted in: "jobs" (sub-customers / QBO Projects) or "customers"
+//                                    (any customer with activity). By default ("none") projects are created in ProjectCost and
+//                                    lines are assigned to them there, or routed by a customer / class / location / account link.
 //   Vendor, Employee              -> vendor, employee
 //   Item (not Category)           -> cost code
-//   Bill / Purchase / VendorCredit lines tagged to a customer, or posted to Cost of Goods Sold -> cost lines
+//   Bill / Purchase / VendorCredit lines tagged to a customer, or posted to a project-cost account -> cost lines
+//                                    (no linked project -> Unassigned costs; an assignment made in ProjectCost survives re-syncs)
 //   TimeActivity (employees, tagged to a project) -> approved time
 //   Invoice / CreditMemo for a project -> billed to date
 //   Accepted estimates            -> starting contract value for new projects
-// Overhead (expense lines with no customer and not COGS) is skipped.
+// Overhead (lines with no customer, on accounts that aren't project cost) is skipped.
 import { and, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db, schema as s } from "@/db";
 
@@ -80,8 +83,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
   const company = await db.query.companies.findFirst({ where: eq(s.companies.id, companyId) });
   if (!company) throw new Error("Company not found.");
   if (company.sampleDataLoadedAt) throw new Error("Remove the sample data before importing from QuickBooks.");
-  const mode = company.qboProjectMode;
-  if (mode !== "jobs" && mode !== "customers") throw new Error("Choose how projects are set up in QuickBooks first.");
+  const mode = company.qboProjectMode === "jobs" || company.qboProjectMode === "customers" ? company.qboProjectMode : "none";
   const since = importWindowStart(now);
   const inWindow = `TxnDate >= '${since}'`;
   const allActive = "Active IN (true, false)";
@@ -173,7 +175,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     ...creditMemos.flatMap((i) => active(i.CustomerRef?.value)),
     ...estimates.flatMap((e) => active(e.CustomerRef?.value)),
   ]);
-  const projectCustomers = qCustomers.filter((c) => (mode === "jobs" ? isJobRecord(c) : referenced.has(String(c.Id))));
+  const projectCustomers = mode === "none" ? [] : qCustomers.filter((c) => (mode === "jobs" ? isJobRecord(c) : referenced.has(String(c.Id))));
 
   // Accepted estimates seed the contract value of projects created by this import
   const contractFromEstimates = new Map<string, number>();

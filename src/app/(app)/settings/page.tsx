@@ -119,26 +119,30 @@ export default async function Settings({ searchParams }: { searchParams: Promise
               <p className="text-amber-900">Remove the sample data below first, so your QuickBooks data isn&apos;t mixed with it.</p>
             ) : (
               <form action={importFromQbo} className="grid gap-3">
-                {!company.qboProjectMode ? (
-                  <fieldset className="grid gap-2">
-                    <legend className="mb-1 font-medium text-slate-800">In QuickBooks, how do you track jobs?</legend>
-                    <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3">
-                      <input type="radio" name="mode" value="jobs" required className="mt-0.5" />
-                      <span><span className="font-medium">As sub-customers or QuickBooks Projects</span>
-                        <span className="block text-xs text-slate-500">e.g. customer &ldquo;Beacon Construction&rdquo; with job &ldquo;2401 Riverside MOB&rdquo; under it. Costs tagged to the parent customer go to Unassigned costs.</span></span>
-                    </label>
-                    <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3">
-                      <input type="radio" name="mode" value="customers" required className="mt-0.5" />
-                      <span><span className="font-medium">Each customer is a job</span>
-                        <span className="block text-xs text-slate-500">Every customer with costs, time, invoices or estimates in the last 24 months becomes a project.</span></span>
-                    </label>
+                <p className="text-slate-700">
+                  Projects are created in ProjectCost. The import brings in your QuickBooks costs, time and invoices; any line that isn&apos;t linked
+                  to a project waits in <span className="font-medium">Unassigned costs</span>, where you assign it. Assignments you make here are kept on every re-sync.
+                </p>
+                <details className="rounded-md border border-slate-200 p-3" open={company.qboProjectMode === "jobs" || company.qboProjectMode === "customers"}>
+                  <summary className="cursor-pointer font-medium text-slate-800">Optional: also create projects from QuickBooks customers</summary>
+                  <p className="mt-1 text-xs text-slate-500">For jobs that already exist in QuickBooks. Costs tagged to those customers are then assigned automatically.</p>
+                  <fieldset className="mt-2 grid gap-2">
+                    {([
+                      ["none", "No, I create projects in ProjectCost", "Customers come in as customers only."],
+                      ["jobs", "Sub-customers and QuickBooks Projects", "e.g. job “2401 Riverside MOB” under customer “Beacon Construction” becomes a project."],
+                      ["customers", "Every customer with recent activity", "Each customer with costs, time, invoices or estimates in the last 24 months becomes a project."],
+                    ] as const).map(([value, label, note]) => (
+                      <label key={value} className="flex items-start gap-2">
+                        <input type="radio" name="mode" value={value} defaultChecked={value === (company.qboProjectMode === "jobs" || company.qboProjectMode === "customers" ? company.qboProjectMode : "none")} className="mt-0.5" />
+                        <span><span className="font-medium">{label}</span><span className="block text-xs text-slate-500">{note}</span></span>
+                      </label>
+                    ))}
                   </fieldset>
-                ) : (
-                  <p className="text-slate-600">Projects come from {company.qboProjectMode === "jobs" ? "sub-customers and QuickBooks Projects" : "customers"}. Re-running updates what changed in QuickBooks; anything you&apos;ve coded here is kept.</p>
-                )}
+                </details>
                 <p className="text-xs text-slate-500">
-                  Brings in customers, projects, vendors, employees, products &amp; services (as cost codes), and the last 24 months of bills, expenses, cheques,
-                  vendor credits, time, invoices and credit memos. Overhead expenses not tagged to a customer are skipped. Nothing is written to QuickBooks.
+                  Brings in customers, vendors, employees, products &amp; services (as cost codes), and the last 24 months of bills, expenses, cheques,
+                  vendor credits, time, invoices and credit memos. Lines with no customer on accounts that aren&apos;t marked as project cost (see
+                  {" "}<Link href="/accounts" className="underline">Accounts</Link>) are treated as overhead and skipped. Nothing is written to QuickBooks.
                 </p>
                 <div><button className="btn">{company.qboLastImportAt ? "Sync now" : "Start import"}</button></div>
               </form>

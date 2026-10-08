@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { companyForOrg } from "@/lib/tenant";
 import { CompanyFields } from "@/components/CompanyFields";
 import { createCompany } from "@/app/company-actions";
+import { Mark } from "@/components/AuthShell";
 import { TRIAL_DAYS } from "@/lib/plans";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ function Shell({ step, title, children }: { step: 1 | 2; title: string; children
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="flex items-center justify-between bg-brand-900 px-5 py-3">
-        <span className="font-semibold text-white">ProjectCost</span>
+        <span className="flex items-center gap-2 font-bold tracking-tight text-white"><Mark className="h-6 w-6" />PROJECTCOST <span className="font-semibold text-[#7FC7CF]">by Axiom</span></span>
         <UserButton />
       </header>
       <div className="mx-auto max-w-xl px-4 py-10">

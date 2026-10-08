@@ -16,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           signInFallbackRedirectUrl="/dashboard"
           signUpFallbackRedirectUrl="/onboarding"
           taskUrls={{ "choose-organization": "/onboarding" }}
+          appearance={{ variables: { colorPrimary: "#0E7C86" } }}
         >
           {children}
         </ClerkProvider>

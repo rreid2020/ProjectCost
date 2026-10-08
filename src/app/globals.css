@@ -2,12 +2,13 @@
 
 @theme {
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --color-brand-50: #eef6f4;
-  --color-brand-100: #d5ebe6;
-  --color-brand-500: #1f7a68;
-  --color-brand-600: #17614f;
-  --color-brand-700: #124c3f;
-  --color-brand-900: #0b2d26;
+  /* Same palette as the sign-in pages and the landing page: navy panels, teal actions */
+  --color-brand-50: #e8f4f5;
+  --color-brand-100: #cfe3ee;
+  --color-brand-500: #13919c;
+  --color-brand-600: #0e7c86;
+  --color-brand-700: #0b6870;
+  --color-brand-900: #00204a;
 }
 
 body {

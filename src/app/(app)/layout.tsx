@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Nav } from "@/components/Nav";
+import { Mark } from "@/components/AuthShell";
 import { getTenant } from "@/lib/tenant";
 import { pendingTimeCount, unassignedCount } from "@/lib/queries";
 import { cookies } from "next/headers";
@@ -27,8 +28,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col bg-brand-900 py-5 md:flex">
         <div className="mb-4 px-5">
-          <Link href="/dashboard" className="text-lg font-semibold tracking-tight text-white">ProjectCost</Link>
-          <div className="text-xs text-brand-100/80">Project costing &amp; WIP</div>
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <Mark className="h-7 w-7 shrink-0" />
+            <span className="leading-tight">
+              <span className="block text-base font-bold tracking-tight text-white">PROJECTCOST</span>
+              <span className="block text-xs font-semibold text-[#7FC7CF]">by Axiom</span>
+            </span>
+          </Link>
         </div>
         <div className="mb-4 px-3">
           <OrganizationSwitcher
@@ -53,7 +59,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="min-w-0 flex-1">
         {/* compact header for small screens, where the sidebar is hidden */}
         <div className="flex items-center justify-between gap-3 bg-brand-900 px-4 py-2 md:hidden">
-          <Link href="/dashboard" className="font-semibold text-white">ProjectCost</Link>
+          <Link href="/dashboard" className="flex items-center gap-2 font-bold tracking-tight text-white"><Mark className="h-6 w-6" />PROJECTCOST</Link>
           <div className="flex items-center gap-3">
             <GuideButton done={guide.done} total={guide.total} />
             <OrganizationSwitcher hidePersonal afterSelectOrganizationUrl="/dashboard" afterCreateOrganizationUrl="/onboarding" appearance={{ elements: { organizationSwitcherTrigger: "[&_*]:!text-white" } }} />

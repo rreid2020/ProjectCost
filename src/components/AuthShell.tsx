@@ -17,7 +17,7 @@ export const authAppearance = {
   },
 };
 
-function Mark({ className = "" }: { className?: string }) {
+export function Mark({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
       <rect width="24" height="24" rx="2" fill="#0E7C86" />

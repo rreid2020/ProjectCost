@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@electric-sql/pglite", "exceljs"],
   // spreadsheet uploads go through a server action
   experimental: { serverActions: { bodySizeLimit: "10mb" } },
+  // hide the "N" dev-tools badge in the corner while running locally (it never shows in production)
+  devIndicators: false,
 };
 
 export default nextConfig;

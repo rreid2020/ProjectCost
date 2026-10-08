@@ -78,7 +78,7 @@ export async function companyOverhead(company: typeof s.companies.$inferSelect, 
     db.select({ amount: s.costTransactions.amountCents, account: s.costTransactions.qboAccountId }).from(s.costTransactions)
       .where(and(eq(s.costTransactions.companyId, c), isNotNull(s.costTransactions.projectId), gte(s.costTransactions.date, period.start), lte(s.costTransactions.date, period.end))),
     db.select({ h: s.timeEntries.hoursX100, pay: s.timeEntries.payRateCents, burden: s.timeEntries.burdenBp }).from(s.timeEntries)
-      .where(and(eq(s.timeEntries.companyId, c), eq(s.timeEntries.status, "APPROVED"), gte(s.timeEntries.date, period.start), lte(s.timeEntries.date, period.end))),
+      .where(and(eq(s.timeEntries.companyId, c), eq(s.timeEntries.status, "APPROVED"), isNotNull(s.timeEntries.projectId), gte(s.timeEntries.date, period.start), lte(s.timeEntries.date, period.end))),
   ]);
 
   const jobCostByAccount = new Map<string, number>();

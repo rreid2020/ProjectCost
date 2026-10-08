@@ -37,7 +37,7 @@ export const maxDuration = 300;
 const SUMMARY_LABELS: [keyof ImportSummary, string][] = [
   ["projects", "Projects"], ["newProjects", "New projects"], ["customers", "Customers"], ["vendors", "Vendors"], ["employees", "Employees"],
   ["costCodes", "Cost codes"], ["costLines", "Cost lines"], ["needsCoding", "Lines to code"], ["overheadSkipped", "Overhead lines skipped"],
-  ["timeEntries", "Time entries"], ["timeSkipped", "Time entries skipped"], ["invoices", "Invoices"], ["removed", "Removed (deleted in QBO)"],
+  ["timeEntries", "Time entries"], ["timeUnassigned", "Time to assign"], ["timeSkipped", "Time entries skipped"], ["invoices", "Invoices"], ["removed", "Removed (deleted in QBO)"],
 ];
 
 export default async function Settings({ searchParams }: { searchParams: Promise<{ qbo?: string }> }) {

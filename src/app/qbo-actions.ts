@@ -67,7 +67,7 @@ export async function importFromQbo(form: FormData) {
     } catch (e) {
       await log(t.company.id, t.userId, "ERROR", `Overhead pool (Profit and Loss) not refreshed: ${e instanceof Error ? e.message : String(e)}`, t.company.qboRealmId, "Import");
     }
-    await log(t.company.id, t.userId, "OK", `Imported: ${summary.projects} projects (${summary.newProjects} new), ${summary.costLines} cost lines (${summary.needsCoding} to code), ${summary.timeEntries} time entries, ${summary.invoices} invoices`, t.company.qboRealmId, "Import");
+    await log(t.company.id, t.userId, "OK", `Imported: ${summary.projects} projects (${summary.newProjects} new), ${summary.costLines} cost lines (${summary.needsCoding} to code), ${summary.timeEntries} time entries (${summary.timeUnassigned} to assign), ${summary.invoices} invoices`, t.company.qboRealmId, "Import");
   } catch (e) {
     const tid = e instanceof QboError && e.intuitTid ? ` (intuit_tid ${e.intuitTid})` : "";
     const message = `${e instanceof Error ? e.message : String(e)}${tid}`;

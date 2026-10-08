@@ -1,6 +1,6 @@
 import "server-only";
 import { db, schema as s } from "@/db";
-import { and, eq, isNull, asc, desc, inArray, count, or } from "drizzle-orm";
+import { and, eq, isNull, asc, desc, inArray, count, or, ne } from "drizzle-orm";
 import { labourCost, projectEconomics, healthFlags, type CodeInput, type CostType } from "./engine";
 import { inventoryFlow, capitalFlow, type DatedCost, type UnitEvent } from "./project-accounting";
 
@@ -146,8 +146,22 @@ export async function pendingTimeCount(companyId: string) {
   return r.n;
 }
 
+/** Time with no project yet (QuickBooks time not linked to a project), excluding time marked as not project work. */
+export async function unassignedTime(companyId: string) {
+  return db.query.timeEntries.findMany({
+    where: and(eq(s.timeEntries.companyId, companyId), isNull(s.timeEntries.projectId), ne(s.timeEntries.status, "NON_PROJECT")),
+    with: { employee: true, costCode: true },
+    orderBy: desc(s.timeEntries.date),
+  });
+}
+
+/** Cost lines and time entries waiting for a project or cost code. */
 export async function unassignedCount(companyId: string) {
-  const [r] = await db.select({ n: count() }).from(s.costTransactions)
-    .where(and(eq(s.costTransactions.companyId, companyId), or(isNull(s.costTransactions.projectId), isNull(s.costTransactions.costCodeId))));
-  return r.n;
+  const [[r], [t]] = await Promise.all([
+    db.select({ n: count() }).from(s.costTransactions)
+      .where(and(eq(s.costTransactions.companyId, companyId), or(isNull(s.costTransactions.projectId), isNull(s.costTransactions.costCodeId)))),
+    db.select({ n: count() }).from(s.timeEntries)
+      .where(and(eq(s.timeEntries.companyId, companyId), isNull(s.timeEntries.projectId), ne(s.timeEntries.status, "NON_PROJECT"))),
+  ]);
+  return r.n + t.n;
 }

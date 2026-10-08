@@ -56,7 +56,7 @@ function fixtures() {
     VendorCredit: [] as QboRecord[],
     TimeActivity: [
       { Id: "7", TxnDate: "2026-09-01", NameOf: "Employee", EmployeeRef: { value: "55" }, CustomerRef: { value: "66" }, ItemRef: { value: "2" }, Hours: 7, Minutes: 30 },
-      { Id: "8", TxnDate: "2026-09-02", NameOf: "Employee", EmployeeRef: { value: "55" }, Hours: 8 }, // no job: skipped
+      { Id: "8", TxnDate: "2026-09-02", NameOf: "Employee", EmployeeRef: { value: "55" }, Hours: 8 }, // no job: comes in unassigned
       { Id: "9", TxnDate: "2026-09-02", NameOf: "Vendor", VendorRef: { value: "35" }, CustomerRef: { value: "66" }, Hours: 4 }, // vendor time: skipped
     ],
     Invoice: [
@@ -137,8 +137,9 @@ describe("jobs mode, Canadian company", () => {
 
   it("turns items (not categories) into cost codes with a guessed type", async () => {
     const codes = await rows.codes(c);
-    const byItem = Object.fromEntries(codes.map((x) => [x.qboItemId, x]));
+    const byItem = Object.fromEntries(codes.filter((x) => x.qboItemId).map((x) => [x.qboItemId, x]));
     expect(Object.keys(byItem).sort()).toEqual(["13", "2", "21"]);
+    expect(codes.filter((x) => !x.qboItemId).map((x) => x.code)).toEqual(["LAB-UNCODED"]); // for time with no service item
     expect(byItem["2"].costType).toBe("LABOUR");
     expect(byItem["21"]).toMatchObject({ code: "NB-476", costType: "MATERIAL" });
   });
@@ -164,11 +165,15 @@ describe("jobs mode, Canadian company", () => {
     expect(inv).toMatchObject({ totalCents: 11_300_00, taxCents: 1_300_00, amountCents: 10_000_00 });
   });
 
-  it("imports employee time on projects as approved, at the employee's rate", async () => {
+  it("imports employee time as approved, at the employee's rate; time with no project waits unassigned", async () => {
     const time = await rows.time(c);
-    expect(time).toHaveLength(1);
-    expect(time[0]).toMatchObject({ hoursX100: 750, payRateCents: 4200, billRateCents: 9500, status: "APPROVED" });
-    expect(summary.timeSkipped).toBe(2);
+    expect(time).toHaveLength(2);
+    const onJob = time.find((x) => x.qboTimeActivityId === "7")!;
+    expect(onJob.projectId).not.toBeNull();
+    expect(onJob).toMatchObject({ hoursX100: 750, payRateCents: 4200, billRateCents: 9500, status: "APPROVED" });
+    expect(time.find((x) => x.qboTimeActivityId === "8")).toMatchObject({ projectId: null, hoursX100: 800, status: "APPROVED" });
+    expect(summary.timeUnassigned).toBe(1);
+    expect(summary.timeSkipped).toBe(1); // vendor time arrives on bills
   });
 
   it("counts QuickBooks invoices and credit memos (pre-tax) as billed to date", async () => {
@@ -191,13 +196,34 @@ describe("jobs mode, Canadian company", () => {
     const second = await runImport({ companyId: c, query: queryFor(data), now: NOW });
 
     expect(await rows.projects(c)).toHaveLength(2);
-    expect(await rows.codes(c)).toHaveLength(3);
-    expect(await rows.time(c)).toHaveLength(1);
+    expect(await rows.codes(c)).toHaveLength(4);
+    expect(await rows.time(c)).toHaveLength(2);
     const costs = await rows.costs(c);
     expect(costs).toHaveLength(5);
     expect(second.removed).toBe(1);
     expect(costs.find((x) => x.id === lew.id)).toMatchObject({ projectId: retreat.id, costCodeId: misc.id, pendingPush: true });
     expect(await db.query.projects.findFirst({ where: eq(s.projects.id, retreat.id) })).toMatchObject({ name: "Renamed in ProjectCost", originalContractCents: 1 });
+  });
+});
+
+describe("unassigned QuickBooks time", () => {
+  it("keeps a project and code assigned in ProjectCost, and time marked as not project work, across re-syncs", async () => {
+    const c = (await newCompany("TimeSync", { qboProjectMode: "none" })).id;
+    const data = fixtures();
+    (data.TimeActivity as QboRecord[]).push({ Id: "10", TxnDate: "2026-09-03", NameOf: "Employee", EmployeeRef: { value: "55" }, Hours: 2, Description: "Shop cleanup" });
+    await runImport({ companyId: c, query: queryFor(data), now: NOW });
+    const [p] = await db.insert(s.projects).values({ companyId: c, number: "P-9", name: "Made in ProjectCost", originalContractCents: 0 }).returning();
+    const labour = (await rows.codes(c)).find((x) => x.qboItemId === "2")!;
+    const time = await rows.time(c);
+    expect(time.every((x) => x.projectId === null)).toBe(true); // nothing is linked in "none" mode
+    const t8 = time.find((x) => x.qboTimeActivityId === "8")!, t10 = time.find((x) => x.qboTimeActivityId === "10")!;
+    await db.update(s.timeEntries).set({ projectId: p.id, costCodeId: labour.id }).where(eq(s.timeEntries.id, t8.id));
+    await db.update(s.timeEntries).set({ status: "NON_PROJECT" }).where(eq(s.timeEntries.id, t10.id));
+
+    await runImport({ companyId: c, query: queryFor(data), now: NOW });
+    const after = await rows.time(c);
+    expect(after.find((x) => x.id === t8.id)).toMatchObject({ projectId: p.id, costCodeId: labour.id, status: "APPROVED" });
+    expect(after.find((x) => x.id === t10.id)).toMatchObject({ projectId: null, status: "NON_PROJECT" });
   });
 });
 

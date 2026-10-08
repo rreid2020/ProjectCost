@@ -337,16 +337,17 @@ export const timeEntries = pgTable(
     id: id(),
     companyId: companyId(),
     employeeId: text("employee_id").notNull(),
-    projectId: text("project_id").notNull(),
+    projectId: text("project_id"), // null: QuickBooks time with no project yet; assigned on Unassigned costs
     costCodeId: text("cost_code_id").notNull(),
     date: text("date").notNull(),
     hoursX100: integer("hours_x100").notNull(),
     payRateCents: integer("pay_rate_cents").notNull(), // captured at entry (effective-dated)
     burdenBp: integer("burden_bp").notNull(),
     billRateCents: integer("bill_rate_cents").notNull(),
-    status: text("status").notNull().default("SUBMITTED"), // SUBMITTED | APPROVED
+    status: text("status").notNull().default("SUBMITTED"), // SUBMITTED | APPROVED | NON_PROJECT (unassigned time marked as not project work)
     notes: text("notes"),
     qboTimeActivityId: text("qbo_time_activity_id"),
+    qboCustomerName: text("qbo_customer_name"), // what QuickBooks said (customer / class / location), shown when assigning
     importBatchId: text("import_batch_id"),
     externalRef: text("external_ref"),
   },

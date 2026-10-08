@@ -54,7 +54,7 @@ export default async function Time() {
                       <td><input type="checkbox" name="ids" value={t.id} defaultChecked aria-label="Approve" /></td>
                       <td className="whitespace-nowrap text-xs">{fmtDate(t.date)}</td>
                       <td>{t.employee.name}</td>
-                      <td>{t.project.number}</td>
+                      <td>{t.project?.number ?? "—"}</td>
                       <td className="font-mono text-xs">{t.costCode.code}</td>
                       <td className="num">{hours(t.hoursX100)}</td>
                       <td className="num"><M v={labourCost(t.hoursX100, t.payRateCents, t.burdenBp).total} cents /></td>

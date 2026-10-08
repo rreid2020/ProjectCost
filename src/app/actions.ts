@@ -5,7 +5,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db, schema as s } from "@/db";
-import { and, eq, max, inArray } from "drizzle-orm";
+import { and, eq, max, inArray, isNull } from "drizzle-orm";
 import { toCents } from "@/lib/format";
 import { loadPortfolio } from "@/lib/queries";
 import { requireAdmin, requireWrite, type Tenant } from "@/lib/tenant";
@@ -34,6 +34,28 @@ export async function assignCost(form: FormData) {
     .where(and(eq(s.costTransactions.id, id), eq(s.costTransactions.companyId, t.company.id))).returning();
   if (!txn) return;
   await log(t, "Bill line", `Coded ${txn.docNumber ?? txn.id} to a project and cost code in ProjectCost (QuickBooks unchanged)`);
+  revalidatePath("/", "layout");
+}
+
+/** Assigns QuickBooks time that had no project. Kept in ProjectCost on every re-sync; QuickBooks is unchanged. */
+export async function assignTime(form: FormData) {
+  const t = await requireWrite();
+  const id = str(form, "id"), projectId = str(form, "projectId"), costCodeId = str(form, "costCodeId");
+  if (!projectId || !costCodeId) return;
+  await ownProject(t.company.id, projectId);
+  const code = await db.query.costCodes.findFirst({ where: and(eq(s.costCodes.id, costCodeId), eq(s.costCodes.companyId, t.company.id)) });
+  if (!code) return;
+  const [row] = await db.update(s.timeEntries).set({ projectId, costCodeId, status: "APPROVED" })
+    .where(and(eq(s.timeEntries.id, id), eq(s.timeEntries.companyId, t.company.id))).returning();
+  if (row) await log(t, "Time", `Assigned ${row.hoursX100 / 100} h on ${row.date} to a project in ProjectCost (QuickBooks unchanged)`);
+  revalidatePath("/", "layout");
+}
+
+/** Time that isn't project work (shop, admin, training): drops off the unassigned list and stays off on re-syncs. */
+export async function markTimeNonProject(form: FormData) {
+  const t = await requireWrite();
+  await db.update(s.timeEntries).set({ status: "NON_PROJECT" })
+    .where(and(eq(s.timeEntries.id, str(form, "id")), eq(s.timeEntries.companyId, t.company.id), isNull(s.timeEntries.projectId)));
   revalidatePath("/", "layout");
 }
 

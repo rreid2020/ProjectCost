@@ -10,7 +10,7 @@
 //   Item (not Category)           -> cost code
 //   Bill / Purchase / VendorCredit lines tagged to a customer, or posted to a project-cost account -> cost lines
 //                                    (no linked project -> Unassigned costs; an assignment made in ProjectCost survives re-syncs)
-//   TimeActivity (employees, tagged to a project) -> approved time
+//   TimeActivity (employees)      -> approved time; with no linked project it waits in Unassigned costs
 //   Invoice / CreditMemo for a project -> billed to date
 //   Accepted estimates            -> starting contract value for new projects
 // Overhead (lines with no customer, on accounts that aren't project cost) is skipped.
@@ -23,7 +23,7 @@ export type QboQuery = (entity: string, where?: string) => Promise<QboRecord[]>;
 
 export type ImportSummary = {
   customers: number; projects: number; newProjects: number; vendors: number; employees: number; costCodes: number;
-  costLines: number; needsCoding: number; overheadSkipped: number; timeEntries: number; timeSkipped: number;
+  costLines: number; needsCoding: number; overheadSkipped: number; timeEntries: number; timeUnassigned: number; timeSkipped: number;
   invoices: number; removed: number;
 };
 
@@ -184,7 +184,7 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     contractFromEstimates.set(k, (contractFromEstimates.get(k) ?? 0) + cents((e.TotalAmt ?? 0) - (e.TxnTaxDetail?.TotalTax ?? 0)) * Number(e.ExchangeRate ?? 1));
   }
 
-  const summary: ImportSummary = { customers: 0, projects: 0, newProjects: 0, vendors: 0, employees: 0, costCodes: 0, costLines: 0, needsCoding: 0, overheadSkipped: 0, timeEntries: 0, timeSkipped: 0, invoices: 0, removed: 0 };
+  const summary: ImportSummary = { customers: 0, projects: 0, newProjects: 0, vendors: 0, employees: 0, costCodes: 0, costLines: 0, needsCoding: 0, overheadSkipped: 0, timeEntries: 0, timeUnassigned: 0, timeSkipped: 0, invoices: 0, removed: 0 };
   const nowIso = now.toISOString();
 
   // ---------- 2. write, all or nothing ----------
@@ -342,18 +342,21 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
     // Time (employees only; vendor time arrives on bills)
     const seenTime = new Set<string>();
     const timeValues: (typeof s.timeEntries.$inferInsert)[] = [];
+    const uncodedId = times.length ? await uncodedLabour() : "";
     for (const t of times) {
       const emp = t.EmployeeRef?.value ? empByQbo.get(String(t.EmployeeRef.value)) : undefined;
-      const projectId = resolve(t.CustomerRef, t.ClassRef, t.DepartmentRef) ?? undefined;
+      const projectId = resolve(t.CustomerRef, t.ClassRef, t.DepartmentRef);
       let hours = Number(t.Hours ?? 0) + Number(t.Minutes ?? 0) / 60;
       if (!hours && t.StartTime && t.EndTime) hours = (Date.parse(t.EndTime) - Date.parse(t.StartTime)) / 3_600_000 - Number(t.BreakHours ?? 0) - Number(t.BreakMinutes ?? 0) / 60;
-      if (!emp || !projectId || !(hours > 0)) { summary.timeSkipped++; continue; }
-      const costCodeId = (t.ItemRef?.value && codeIdByItem.get(String(t.ItemRef.value))) || (await uncodedLabour());
+      if (!emp || !(hours > 0)) { summary.timeSkipped++; continue; }
+      const costCodeId = (t.ItemRef?.value && codeIdByItem.get(String(t.ItemRef.value))) || uncodedId;
+      if (!projectId) summary.timeUnassigned++;
       seenTime.add(String(t.Id));
       timeValues.push({
         companyId: c, qboTimeActivityId: String(t.Id), employeeId: emp.id, projectId, costCodeId, date: String(t.TxnDate),
         hoursX100: Math.round(hours * 100), payRateCents: emp.payRateCents, burdenBp: emp.burdenBp,
         billRateCents: t.HourlyRate != null ? cents(t.HourlyRate) : emp.billRateCents, status: "APPROVED", notes: t.Description ? String(t.Description) : null,
+        qboCustomerName: t.CustomerRef?.name ? String(t.CustomerRef.name) : t.ClassRef?.name ? `Class: ${t.ClassRef.name}` : t.DepartmentRef?.name ? `Location: ${t.DepartmentRef.name}` : null,
       });
     }
     const te = s.timeEntries;
@@ -361,8 +364,12 @@ export async function runImport({ companyId, query, now = new Date() }: { compan
       await tx.insert(te).values(part).onConflictDoUpdate({
         target: [te.companyId, te.qboTimeActivityId],
         set: {
-          employeeId: sql`excluded.employee_id`, projectId: sql`excluded.project_id`, costCodeId: sql`excluded.cost_code_id`, date: sql`excluded.date`,
+          employeeId: sql`excluded.employee_id`, date: sql`excluded.date`, qboCustomerName: sql`excluded.qbo_customer_name`,
           hoursX100: sql`excluded.hours_x100`, notes: sql`excluded.notes`, billRateCents: sql`excluded.bill_rate_cents`,
+          // QuickBooks wins when it links the time to a project or names a service item; otherwise keep what was set in ProjectCost
+          projectId: sql`coalesce(excluded.project_id, ${te.projectId})`,
+          costCodeId: sql`case when excluded.cost_code_id = ${uncodedId} then ${te.costCodeId} else excluded.cost_code_id end`,
+          status: sql`case when excluded.project_id is not null then 'APPROVED' else ${te.status} end`,
           // keep the rate captured earlier unless none was known then
           payRateCents: sql`case when ${te.payRateCents} = 0 then excluded.pay_rate_cents else ${te.payRateCents} end`,
           burdenBp: sql`case when ${te.payRateCents} = 0 then excluded.burden_bp else ${te.burdenBp} end`,

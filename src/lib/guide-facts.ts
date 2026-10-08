@@ -1,12 +1,13 @@
 import "server-only";
 import { cache } from "react";
 import { clerkClient } from "@clerk/nextjs/server";
-import { and, count, countDistinct, eq, gte, inArray, isNotNull, isNull, or } from "drizzle-orm";
+import { and, count, countDistinct, eq, gte, inArray, isNotNull, or } from "drizzle-orm";
 import { db, schema as s } from "@/db";
 import type { Company } from "./tenant";
 import { buildGuide, type GuideFacts, type Mark } from "./guide";
 import { qboConfigured } from "./qbo";
 import { companyOverhead } from "./overhead";
+import { unassignedCount } from "./queries";
 
 // Month being worked on: the current calendar month (matches the WIP page's period).
 function currentPeriod(now: Date) {
@@ -54,7 +55,7 @@ export const guideFor = cache(async (company: Company, orgId: string, now = new 
     one(db.select({ n: countDistinct(P.id) }).from(P).leftJoin(s.projectQboLinks, eq(s.projectQboLinks.projectId, P.id))
       .where(and(activeProject, inArray(P.projectType, ["CAPITAL", "INVENTORY"]), or(isNotNull(s.projectQboLinks.id), isNotNull(P.qboProjectId))))),
     one(db.select({ n: count() }).from(s.overheadAccounts).where(eq(s.overheadAccounts.companyId, c))),
-    one(db.select({ n: count() }).from(s.costTransactions).where(and(eq(s.costTransactions.companyId, c), or(isNull(s.costTransactions.projectId), isNull(s.costTransactions.costCodeId))))),
+    unassignedCount(c), // cost lines and time waiting for a project or code
     one(db.select({ n: count() }).from(s.timeEntries).where(and(eq(s.timeEntries.companyId, c), eq(s.timeEntries.status, "SUBMITTED")))),
     one(db.select({ n: count() }).from(s.changeOrders).innerJoin(P, eq(P.id, s.changeOrders.projectId)).where(and(eq(s.changeOrders.companyId, c), eq(s.changeOrders.status, "PENDING"), eq(P.status, "ACTIVE")))),
     one(db.select({ n: countDistinct(s.forecasts.projectId) }).from(s.forecasts).innerJoin(P, eq(P.id, s.forecasts.projectId))

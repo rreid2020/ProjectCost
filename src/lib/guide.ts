@@ -98,14 +98,21 @@ export const GUIDE_STEPS: GuideStepDef[] = [
     key: "import", group: "Set up", title: "Bring in projects and costs", href: (f) => (f.qboConnected ? "/settings" : "/imports"), openLabel: "Open import",
     why: "Projects, costs, time and billing need to be in ProjectCost before anything can be measured. Re-running an import updates in place; it doesn't duplicate.",
     how: (f) => [
-      ...(via(f).qbo ? [`**From QuickBooks:** on **Settings**, under **Import from QuickBooks**, click **Start import**. Costs come in from QuickBooks; lines not linked to a project wait in **Unassigned costs** for you to assign. (Optional: have existing QuickBooks jobs or customers become projects too.)`] : []),
+      ...(via(f).qbo ? [
+        `${PC} create each project on **Projects** → **New project** (customer contract, capital project or build for sale). Projects aren't made from QuickBooks unless you choose that option at import.`,
+        `**From QuickBooks:** on **Settings**, under **Import from QuickBooks**, click **Start import** (or **Sync now**). Costs and time come in; lines not linked to a project wait in **Unassigned costs** for you to assign. (Optional: have existing QuickBooks jobs or customers become projects too.)`,
+      ] : []),
       ...(via(f).sheets ? [
         `${SH} on **Import data**, import in this order: **Projects** → **Cost codes** → **Budgets** → **Employees** → **Cost transactions** and **Time** → **Invoices billed**.`,
         "Each upload shows a preview with any problems by row; costs whose project or code doesn't match go to **Unassigned costs** instead of being lost.",
       ] : []),
     ],
     checks: (f) => [
-      { label: "Projects are in ProjectCost", done: f.activeProjects > 0, detail: f.activeProjects ? plural(f.activeProjects, "active project") : undefined },
+      {
+        label: "At least one active project", done: f.activeProjects > 0,
+        detail: f.activeProjects ? plural(f.activeProjects, "active project") : "Create your projects in ProjectCost",
+        action: f.activeProjects ? undefined : { label: "New project", href: "/projects/new" },
+      },
       {
         label: "Costs brought in", done: (f.imported && f.lastImportOk) || f.sheetCostImports > 0,
         detail: f.imported && !f.lastImportOk ? "The last QuickBooks import failed: see the sync log" : undefined,

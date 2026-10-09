@@ -95,24 +95,16 @@ export const GUIDE_STEPS: GuideStepDef[] = [
     checks: (f) => [{ label: "At least one other person in the workspace", done: (f.memberCount ?? 0) > 1 }],
   },
   {
-    key: "import", group: "Set up", title: "Bring in projects and costs", href: (f) => (f.qboConnected ? "/settings" : "/imports"), openLabel: "Open import",
-    why: "Projects, costs, time and billing need to be in ProjectCost before anything can be measured. Re-running an import updates in place; it doesn't duplicate.",
+    key: "import", group: "Set up", title: "Bring in costs", href: (f) => (f.qboConnected ? "/settings" : "/imports"), openLabel: "Open import",
+    why: "Costs, time and billing need to be in ProjectCost before anything can be measured. You don't need projects yet: lines wait in Unassigned costs until you create projects (the Set up projects step) and assign them. Re-running an import updates in place; it doesn't duplicate.",
     how: (f) => [
-      ...(via(f).qbo ? [
-        `${PC} create each project on **Projects** → **New project** (customer contract, capital project or build for sale). Projects aren't made from QuickBooks unless you choose that option at import.`,
-        `**From QuickBooks:** on **Settings**, under **Import from QuickBooks**, click **Start import** (or **Sync now**). Costs and time come in; lines not linked to a project wait in **Unassigned costs** for you to assign. (Optional: have existing QuickBooks jobs or customers become projects too.)`,
-      ] : []),
+      ...(via(f).qbo ? [`**From QuickBooks:** on **Settings**, under **Import from QuickBooks**, click **Start import** (or **Sync now**). Costs and time come in; anything not linked to a project waits in **Unassigned costs**. (Optional: have existing QuickBooks jobs or customers become projects too.)`] : []),
       ...(via(f).sheets ? [
         `${SH} on **Import data**, import in this order: **Projects** → **Cost codes** → **Budgets** → **Employees** → **Cost transactions** and **Time** → **Invoices billed**.`,
         "Each upload shows a preview with any problems by row; costs whose project or code doesn't match go to **Unassigned costs** instead of being lost.",
       ] : []),
     ],
     checks: (f) => [
-      {
-        label: "At least one active project", done: f.activeProjects > 0,
-        detail: f.activeProjects ? plural(f.activeProjects, "active project") : "Create your projects in ProjectCost",
-        action: f.activeProjects ? undefined : { label: "New project", href: "/projects/new" },
-      },
       {
         label: "Costs brought in", done: (f.imported && f.lastImportOk) || f.sheetCostImports > 0,
         detail: f.imported && !f.lastImportOk ? "The last QuickBooks import failed: see the sync log" : undefined,
@@ -170,14 +162,15 @@ export const GUIDE_STEPS: GuideStepDef[] = [
     key: "projects", group: "Projects", title: "Set up projects", href: "/projects", openLabel: "Open projects",
     why: "Projects need a contract value and a budget before % complete and profit mean anything. Capital and build-for-sale projects need to know where their costs come from.",
     how: (f) => [
-      ...(via(f).qbo ? ["**From QuickBooks:** customer contracts come from customers or sub-customer jobs on each sync."] : []),
+      `${PC} on **Projects**, click **New project** for each customer contract, capital project or build for sale.`,
+      ...(via(f).qbo ? ["**From QuickBooks:** projects only come from customers or sub-customer jobs if you chose that option under **Import from QuickBooks**."] : []),
       ...(via(f).sheets ? [`${SH} a **Projects** import can carry contract value, dates, holdback and tax; a **Budgets** import fills the budget by cost code.`] : []),
-      `${PC} or set it by hand: on each project's **Setup** tab enter the **contract value**; on **Budget**, the original budget by cost code. **New project** creates capital or build-for-sale work.`,
-      ...(via(f).qbo ? ["For capital or build-for-sale projects tracked in QuickBooks by class, location or account, link it on the project's **Setup** tab."] : []),
+      `${PC} on each project's **Setup** tab enter the **contract value**; on **Budget**, the original budget by cost code.`,
+      ...(via(f).qbo ? [`${PC} then assign waiting lines on **Unassigned costs**. To have future lines assigned automatically, link the project to its QuickBooks customer, class, location or account on its **Setup** tab.`] : []),
       ...(via(f).sheets ? ["Spreadsheet rows find their project by **project number**, so keep numbers the same in every file."] : []),
     ],
     checks: (f) => [
-      { label: "Active projects exist", done: f.activeProjects > 0, detail: f.activeProjects ? plural(f.activeProjects, "active project") : undefined },
+      { label: "Active projects exist", done: f.activeProjects > 0, detail: f.activeProjects ? plural(f.activeProjects, "active project") : undefined, action: f.activeProjects ? undefined : { label: "New project", href: "/projects/new" } },
       { label: "Every active contract has a contract value", done: f.activeContracts > 0 && f.contractsWithoutValue === 0, detail: f.contractsWithoutValue ? `${plural(f.contractsWithoutValue, "contract")} at $0` : undefined },
       { label: "Every active project has a budget", done: f.activeProjects > 0 && f.projectsWithoutBudget === 0, detail: f.projectsWithoutBudget ? `${plural(f.projectsWithoutBudget, "project")} without one` : undefined },
       ...(f.balanceSheetProjects && f.qboConnected ? [{ label: "Capital / build-for-sale projects are linked to QuickBooks", done: f.internalWithoutLinks === 0, detail: f.internalWithoutLinks ? `${f.internalWithoutLinks} not linked (fine if their costs come from spreadsheets)` : undefined }] : []),

@@ -9,6 +9,7 @@ const items = [
   { href: "/time", label: "Timesheets", badgeKey: "pendingTime" },
   { href: "/employees", label: "Employees" },
   { href: "/wip", label: "WIP & month-end" },
+  { href: "/reports", label: "Reports" },
   { href: "/overhead", label: "Overhead" },
   { href: "/cost-codes", label: "Cost codes" },
   { href: "/accounts", label: "Accounts" },

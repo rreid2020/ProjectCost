@@ -9,6 +9,9 @@ import { wipJournal, burdenJournal, isBalanced } from "@/lib/engine";
 import { closeWipPeriod } from "@/app/actions";
 import { ProjectEntries } from "./ProjectEntries";
 
+// a file download from a route handler, so a plain <a> rather than <Link>
+const WIP_XLSX = "/api/reports/wip";
+
 export default async function Wip({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const { company, isAdmin } = await getTenant();
   const projects = await loadPortfolio(company.id, ["ACTIVE"], ["CONTRACT"]); // WIP schedule = customer contracts only
@@ -46,7 +49,7 @@ export default async function Wip({ searchParams }: { searchParams: Promise<{ mo
         <Stat label="Overbillings (liability)" value={money(over)} />
       </div>
 
-      <Card title="Work-in-progress schedule" className="mt-5" action={<span className="text-xs text-slate-500">Surety / bank format</span>}>
+      <Card title="Work-in-progress schedule" className="mt-5" action={<span className="flex items-center gap-3 text-xs text-slate-500">Surety / bank format <a href={WIP_XLSX} className="font-medium text-brand-600 hover:underline">Download Excel</a><Link href="/reports?r=journal" className="font-medium text-brand-600 hover:underline">Journal entries</Link></span>}>
         <div className="overflow-x-auto">
           <table className="grid-table">
             <thead><tr>

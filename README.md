@@ -51,7 +51,7 @@ To test payments, put test-mode keys in `.env.local` and forward webhooks with t
    and allow plan switching between those prices. Add a webhook endpoint `https://<your-domain>/api/stripe/webhook` for
    `checkout.session.completed` and `customer.subscription.created/updated/deleted/paused/resumed`.
 4. **Vercel:** import the repo and set the environment variables from `.env.example` (`DATABASE_URL`, Clerk keys, `CLERK_WEBHOOK_SIGNING_SECRET`,
-   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`, `APP_URL`). `vercel.json` runs the database
+   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_PRO`, and optionally `STRIPE_PRICE_STARTER_ANNUAL` / `STRIPE_PRICE_PRO_ANNUAL` for annual billing, `APP_URL`). `vercel.json` runs the database
    migrations before each build.
 
 ## What's in milestone 1

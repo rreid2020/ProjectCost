@@ -48,6 +48,7 @@ export const companies = pgTable("company", {
   plan: text("plan"), // key in src/lib/plans.ts
   subscriptionStatus: text("subscription_status"), // Stripe status: trialing | active | past_due | canceled | unpaid ...
   currentPeriodEnd: text("current_period_end"),
+  billingInterval: text("billing_interval"), // month | year, from the subscription's Stripe price
   cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
 }, (t) => [
   // One QuickBooks file can feed only one live company, so two workspaces never sync the same books.

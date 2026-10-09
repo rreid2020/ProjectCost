@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db, schema as s } from "@/db";
 import { requireAdmin } from "@/lib/tenant";
-import { isPlanKey, priceIdFor } from "@/lib/plans";
+import { isInterval, isPlanKey, priceIdFor } from "@/lib/plans";
 import { stripe } from "@/lib/stripe";
 import { appOrigin } from "@/lib/origin";
 
@@ -11,9 +11,10 @@ import { appOrigin } from "@/lib/origin";
 export async function startCheckout(form: FormData) {
   const { company, orgId } = await requireAdmin({ allowInactive: true });
   const plan = String(form.get("plan") ?? "");
-  if (!isPlanKey(plan)) throw new Error("Unknown plan.");
-  const price = priceIdFor(plan);
-  if (!price) throw new Error(`No Stripe price configured for the ${plan} plan.`);
+  const interval = String(form.get("interval") ?? "month");
+  if (!isPlanKey(plan) || !isInterval(interval)) throw new Error("Unknown plan.");
+  const price = priceIdFor(plan, interval);
+  if (!price) throw new Error(`No Stripe price configured for the ${plan} plan, billed ${interval === "year" ? "annually" : "monthly"}.`);
 
   // Already subscribed? Plan changes and cancellations go through the customer portal, not a second subscription.
   if (company.stripeSubscriptionId && ["active", "trialing", "past_due"].includes(company.subscriptionStatus ?? "")) return openBillingPortal();

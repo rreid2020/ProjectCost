@@ -1,17 +1,17 @@
-// Subscription plans. Prices live in Stripe; each plan points at a Price ID from the environment.
-// Edit names, blurbs and features here; create matching recurring Prices in the Stripe dashboard.
+// Subscription plans. Prices live in Stripe; each plan points at a monthly and an (optional) annual Price ID
+// from the environment. Edit names, blurbs and features here; create matching recurring Prices in Stripe.
 export const TRIAL_DAYS = 14;
 
 export const PLANS = {
   starter: {
     name: "Starter",
-    priceEnv: "STRIPE_PRICE_STARTER",
+    priceEnv: { month: "STRIPE_PRICE_STARTER", year: "STRIPE_PRICE_STARTER_ANNUAL" },
     blurb: "For a single estimator or PM running a handful of jobs.",
     features: ["Budgets, change orders & progress billing", "WIP schedule & month-end entries", "QuickBooks Online sync"],
   },
   pro: {
     name: "Pro",
-    priceEnv: "STRIPE_PRICE_PRO",
+    priceEnv: { month: "STRIPE_PRICE_PRO", year: "STRIPE_PRICE_PRO_ANNUAL" },
     blurb: "For contractors with several PMs and field crews.",
     features: ["Everything in Starter", "Unlimited team members", "Surety-format WIP exports & priority support"],
   },
@@ -19,9 +19,19 @@ export const PLANS = {
 
 export type PlanKey = keyof typeof PLANS;
 export const isPlanKey = (k: string): k is PlanKey => k in PLANS;
-export const priceIdFor = (plan: PlanKey) => process.env[PLANS[plan].priceEnv] || null;
-export const planForPriceId = (priceId: string | null | undefined): PlanKey | null =>
-  (Object.keys(PLANS) as PlanKey[]).find((k) => priceIdFor(k) === priceId) ?? null;
+export type Interval = "month" | "year";
+export const INTERVALS: Interval[] = ["month", "year"];
+export const isInterval = (k: string): k is Interval => k === "month" || k === "year";
+export const priceIdFor = (plan: PlanKey, interval: Interval = "month") => process.env[PLANS[plan].priceEnv[interval]] || null;
+/** Which plan and billing interval a Stripe price belongs to. */
+export function planForPriceId(priceId: string | null | undefined): { plan: PlanKey; interval: Interval } | null {
+  if (!priceId) return null;
+  for (const plan of Object.keys(PLANS) as PlanKey[]) for (const interval of INTERVALS) if (priceIdFor(plan, interval) === priceId) return { plan, interval };
+  return null;
+}
+/** Annual saving against twelve monthly payments, in basis points (1700 = 17%). */
+export const annualSavingBp = (monthlyCents: number, annualCents: number) =>
+  monthlyCents > 0 ? Math.round((1 - annualCents / (monthlyCents * 12)) * 10_000) : 0;
 
 // ---------- access rules ----------
 type BillingFields = { trialEndsAt: string | null; subscriptionStatus: string | null; stripeSubscriptionId: string | null };

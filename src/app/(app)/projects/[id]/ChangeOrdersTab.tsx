@@ -1,5 +1,5 @@
 import { Card, M, StatusBadge, Empty } from "@/components/ui";
-import { fmtDate, money } from "@/lib/format";
+import { fmtDate, money, codeLabel } from "@/lib/format";
 import type { LoadedProject } from "@/lib/queries";
 import { createChangeOrder, setChangeOrderStatus } from "@/app/actions";
 
@@ -51,7 +51,7 @@ export function ChangeOrdersTab({ data }: { data: LoadedProject }) {
               <div key={i} className="flex gap-2">
                 <select name={`code${i}`} className="input flex-1" defaultValue="">
                   <option value="">— cost code —</option>
-                  {codes.map((c) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}
+                  {codes.map((c) => <option key={c.id} value={c.id}>{codeLabel(c)}</option>)}
                 </select>
                 <input name={`cost${i}`} className="input w-24 text-right" inputMode="decimal" placeholder="$" />
               </div>

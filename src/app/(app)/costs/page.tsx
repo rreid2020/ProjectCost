@@ -3,7 +3,7 @@ import { and, eq, desc } from "drizzle-orm";
 import { activeProjects, getCostCodes, unassignedCosts, unassignedTime } from "@/lib/queries";
 import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, M, Empty, Badge } from "@/components/ui";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, codeLabel } from "@/lib/format";
 import { assignCost, assignTime, markTimeNonProject } from "@/app/actions";
 import { QboRef } from "@/app/(app)/projects/[id]/LedgerTabs";
 import { qboEnvironment } from "@/lib/qbo";
@@ -44,7 +44,7 @@ export default async function Costs() {
                     </select>
                     <select name="costCodeId" required className="input w-44" defaultValue="">
                       <option value="" disabled>Cost code…</option>
-                      {codes.map((cc) => <option key={cc.id} value={cc.id}>{cc.code} {cc.name}</option>)}
+                      {codes.map((cc) => <option key={cc.id} value={cc.id}>{codeLabel(cc)}</option>)}
                     </select>
                     <button className="btn btn-sm">Assign</button>
                   </form>
@@ -75,7 +75,7 @@ export default async function Costs() {
                     </select>
                     <select name="costCodeId" required className="input w-44" defaultValue={e.costCode?.code === "LAB-UNCODED" ? "" : e.costCodeId}>
                       <option value="" disabled>Cost code…</option>
-                      {(labourCodes.length ? labourCodes : codes).filter((cc) => cc.code !== "LAB-UNCODED").map((cc) => <option key={cc.id} value={cc.id}>{cc.code} {cc.name}</option>)}
+                      {(labourCodes.length ? labourCodes : codes).filter((cc) => cc.code !== "LAB-UNCODED").map((cc) => <option key={cc.id} value={cc.id}>{codeLabel(cc)}</option>)}
                     </select>
                     <button className="btn btn-sm">Assign</button>
                   </form>

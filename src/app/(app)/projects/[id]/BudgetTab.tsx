@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Card, M, Progress, Badge } from "@/components/ui";
-import { money } from "@/lib/format";
+import { money, codeLabel } from "@/lib/format";
 import { UNCODED, type LoadedProject } from "@/lib/queries";
 import type { OverheadResult } from "@/lib/engine";
 import { saveBudgetLine, saveForecast } from "@/app/actions";
@@ -76,7 +76,7 @@ export function BudgetTab({ data, overhead }: { data: LoadedProject; overhead: O
                   <span className="text-xs text-slate-500">Add to budget</span>
                   <select name="costCodeId" required className="input w-64" defaultValue="">
                     <option value="" disabled>Cost code…</option>
-                    {data.codes.filter((c) => c.active && !e.rows.some((r) => r.costCodeId === c.id)).map((c) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}
+                    {data.codes.filter((c) => c.active && !e.rows.some((r) => r.costCodeId === c.id)).map((c) => <option key={c.id} value={c.id}>{codeLabel(c)}</option>)}
                   </select>
                   <input name="amount" required inputMode="decimal" placeholder="Amount" className="input w-28 text-right" />
                   <button className="btn btn-sm">Add</button>

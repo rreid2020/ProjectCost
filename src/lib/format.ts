@@ -15,3 +15,9 @@ export const toCents = (input: string | number) => Math.round(parseFloat(String(
 export const fmtDate = (iso: string | null | undefined) =>
   iso ? new Date(iso + "T12:00:00").toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" }) : "—";
 export const PROJECT_TYPE_LABEL: Record<string, string> = { CONTRACT: "Customer contract", CAPITAL: "Capital project", INVENTORY: "Build for sale" };
+
+/** "LAB-01 Labour", or just "Catering" when the code is the name (QuickBooks items without a SKU use their name as the code). */
+export const codeLabel = (c: { code: string; name: string }) => {
+  const code = c.code.trim(), name = c.name.trim();
+  return !name || name === code || name.startsWith(code) ? name || code : `${code} ${name}`;
+};

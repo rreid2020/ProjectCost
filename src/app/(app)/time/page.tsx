@@ -3,7 +3,7 @@ import { and, eq, asc, desc } from "drizzle-orm";
 import { activeProjects, getCostCodes } from "@/lib/queries";
 import { getTenant } from "@/lib/tenant";
 import { Card, PageHeader, M, Empty } from "@/components/ui";
-import { fmtDate, hours } from "@/lib/format";
+import { fmtDate, hours, codeLabel } from "@/lib/format";
 import { labourCost } from "@/lib/engine";
 import { addTimeEntry, approveTime } from "@/app/actions";
 
@@ -33,7 +33,7 @@ export default async function Time() {
             <label className="grid gap-1"><span className="text-xs text-slate-600">Project</span>
               <select name="projectId" required className="input">{projects.map((p) => <option key={p.id} value={p.id}>{p.number} {p.name}</option>)}</select></label>
             <label className="grid gap-1"><span className="text-xs text-slate-600">Cost code</span>
-              <select name="costCodeId" required className="input">{labourCodes.map((c) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}</select></label>
+              <select name="costCodeId" required className="input">{labourCodes.map((c) => <option key={c.id} value={c.id}>{codeLabel(c)}</option>)}</select></label>
             <div className="grid grid-cols-2 gap-2">
               <label className="grid gap-1"><span className="text-xs text-slate-600">Date</span><input type="date" name="date" defaultValue={today} className="input" /></label>
               <label className="grid gap-1"><span className="text-xs text-slate-600">Hours</span><input name="hours" required inputMode="decimal" className="input text-right" placeholder="8" /></label>
